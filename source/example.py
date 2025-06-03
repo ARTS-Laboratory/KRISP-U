@@ -13,8 +13,7 @@ if __name__ == "__main__":
     model_kwargs = {'variogram_model': 'linear', 'verbose': False, 'enable_plotting': False}
     krispu = KRISPU(X, Z, model_class=OrdinaryKriging, model_kwargs=model_kwargs)
 
-    # Evaluate uncertainty
-    krispu.evaluate(KLD)
+
 
     # Define grid
     gridx = np.linspace(4, 11, 200)
@@ -22,6 +21,8 @@ if __name__ == "__main__":
 
     # Fit model and interpolate uncertainty
     z = krispu.fit(gridx, gridy)
+    # Evaluate uncertainty
+    krispu.evaluate(KLD)
     uncertainty = krispu.interpolate_uncertainty(gridx, gridy)
 
     #plotting
@@ -38,7 +39,6 @@ if __name__ == "__main__":
     #coordinates of highest uncertainty
     max_uncertainty_index = np.unravel_index(np.argmax(uncertainty), uncertainty.shape)
     max_uncertainty_coords = (gridx[max_uncertainty_index[1]], gridy[max_uncertainty_index[0]])
-    print(f"Coordinates of highest uncertainty: {max_uncertainty_coords}")
 
     # Plot both prediction and uncertainty
     im = plt.imshow(uncertainty, extent=(gridx.min(), gridx.max(), gridy.min(), gridy.max()), origin='lower', cmap='magma')

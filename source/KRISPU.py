@@ -60,48 +60,53 @@ class KRISPU:
 
     def evaluate(self, metric=None):
         """
-        Evaluates the model using cross-validation by predicting all coordinates in each fold.
+        Evaluates the model using cross-validation by removing one point at a time.
 
-        Computes per-point uncertainty as KLD between the distribution of predictions
-        across folds and the ground truth.
+        For each fold, removes one point, fits the model to the rest, predicts over the grid,
+        computes the metric (e.g., KLD) between the full-data prediction and the leave-one-out prediction
+        over the entire field, and assigns that uncertainty to the removed point.
 
         Returns:
-            uncertainties (np.ndarray): Per-point uncertainty values.
+            uncertainties (np.ndarray): Uncertainty value for each original data point (shape: n_samples,).
             mean_uncertainty (float): Mean uncertainty across all points.
         """
-        all_fold_preds = []  # Each entry is a prediction of all points from one fold
-        y_true_all = self.y.copy()
+        if metric is None:
+            raise ValueError("A metric function must be provided for evaluation.")
+        if not callable(metric):
+            raise ValueError("The metric must be a callable function.")
+        if self.gridx is None or self.gridy is None:
+            raise ValueError("Grid coordinates (gridx, gridy) must be defined before evaluation, use fit() method first.")
 
-        for train_index, _ in self.splitter.split(self.X):
+        n_samples = self.X.shape[0]
+        uncertainties = np.zeros(n_samples)
+
+        # Fit model on all data to get "ground truth" grid
+        model_full = self.model_class(
+            self.X[:, 0], self.X[:, 1], self.y, **self.model_kwargs
+        )
+        z_true, _ = model_full.execute("grid", self.gridx, self.gridy)
+        z_true_flat = z_true.ravel()
+
+        for idx, (train_index, test_index) in enumerate(self.splitter.split(self.X)):
             X_train, y_train = self.X[train_index], self.y[train_index]
-
             model = self.model_class(
                 X_train[:, 0], X_train[:, 1], y_train, **self.model_kwargs
             )
+            z_pred, _ = model.execute("grid", self.gridx, self.gridy)
+            z_pred_flat = z_pred.ravel()
 
-            # Predict all coordinates
-            z, _ = model.execute("points", self.X[:, 0], self.X[:, 1])
-            all_fold_preds.append(z)
+            # Compute uncertainty over the whole field
+            uncertainty = metric(z_true_flat, z_pred_flat)
+            # Assign this uncertainty to the removed point
+            uncertainties[test_index[0]] = uncertainty
 
-        # Convert to 2D array: shape (n_folds, n_points)
-        preds_matrix = np.vstack(all_fold_preds).T  # shape: (n_points, n_folds)
-
-        # Compute KLD for each point using its distribution of predictions
-        uncertainties = []
-        for i in range(preds_matrix.shape[0]):
-            preds_i = preds_matrix[i, :]  # predictions for point i across folds
-            true_i = np.full_like(preds_i, fill_value=y_true_all[i])
-            kld_i = KLD(true_i, preds_i)
-            uncertainties.append(kld_i)
-
-        uncertainties = np.array(uncertainties)
-        mean_uncertainty = np.mean(uncertainties)
+        sum_uncertainty = np.sum(uncertainties)
         self.uncertainty_points = (self.X, uncertainties)
 
-        print(f"Mean uncertainty: {mean_uncertainty:.4f}")
-        return uncertainties, mean_uncertainty
+        print(f"sum uncertainty: {sum_uncertainty:.4f}")
+        return sum_uncertainty
 
-    def interpolate_uncertainty(self, gridx, gridy):
+    def interpolate_uncertainty(self, gridx, gridy, method='linear'):
         """
         Interpolates the predicted uncertainties over a spatial grid.
         """
@@ -114,7 +119,7 @@ class KRISPU:
         z = uncertainties
 
         kriging = OrdinaryKriging(
-            x, y, z, variogram_model='gaussian', verbose=False, enable_plotting=False
+            x, y, z, variogram_model=method, verbose=False, enable_plotting=False
         )
         z_grid, _ = kriging.execute("grid", gridx, gridy)
         z_grid = z_grid / np.max(z_grid)
