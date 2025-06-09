@@ -19,16 +19,16 @@ This work is licensed under a
 
 Cite as:
 
-David Wamai, Hasan Borke Birgin, Austin Downey, and Joud Satme. Biphasic data acquisition system. GitHub. URL: https://github.com/ARTS-Laboratory/Biphasic-data-acquisition-system
+Matthew Burnett, and Austin Downey. Kriging with Iterative Spatial Prediction of Uncertainty (KRISP-U) Algorithm. GitHub. URL: https://github.com/ARTS-Laboratory/KRISP-U
  
-in bibtex
+in bibtex:
 
 @Misc{Wamai2023BiphasicDataAcquisition,   
-  author       = {David Wamai and Hasan Borke Birgin and Austin Downey and Joud Satme},   
+  author       = {Matthew Burnett, and Austin Downey},   
   howpublished = {GitHub},  
-  title        = {Biphasic Data Acquisition System},   
-  groups       = {{ARTS-L}ab},  
-  url          = {https://github.com/ARTS-Laboratory/Biphasic-data-acquisition-system},  
+  title        = {Kriging with Iterative Spatial Prediction of Uncertainty (KRISP-U) Algorithm},   
+  groups       = {{ARTS-Lab},  
+  url          = {https://github.com/ARTS-Laboratory/KRISP-U},  
 }
 
 <p align="center">
