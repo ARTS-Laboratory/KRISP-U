@@ -23,7 +23,7 @@ Matthew Burnett, and Austin Downey. Kriging with Iterative Spatial Prediction of
  
 in bibtex:
 
-@Misc{Wamai2023BiphasicDataAcquisition,   
+@Misc{BurnettKrigingIterativeSpatial,   
   author       = {Matthew Burnett, and Austin Downey},   
   howpublished = {GitHub},  
   title        = {Kriging with Iterative Spatial Prediction of Uncertainty (KRISP-U) Algorithm},   
