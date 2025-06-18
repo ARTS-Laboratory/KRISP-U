@@ -4,6 +4,7 @@ from sklearn.model_selection import LeaveOneOut, KFold
 from pykrige.ok import OrdinaryKriging
 from Utilities import KLD,MSE,JSD
 from scipy.interpolate import griddata
+import warnings
 
 class KRISPU:
     """
@@ -147,7 +148,10 @@ class KRISPU:
         x = coords[:, 0]
         y = coords[:, 1]
         z = uncertainties
-
+        #if nans are present, replace them with 0
+        if np.isnan(z).any():
+            z = np.nan_to_num(z, nan=0.0)
+            warnings.warn("NaN values found in uncertainties, may be issue with kriging model")
         grid_x, grid_y = np.meshgrid(gridx, gridy)
         z_grid = griddata(
             (x, y), z, (grid_x, grid_y), method=method,fill_value=0)

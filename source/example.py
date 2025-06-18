@@ -7,16 +7,16 @@ from Utilities import KLD, MSE, JSD
 from KRISPU import KRISPU
 
 if __name__ == "__main__":
-    X_coords,Y_coords,Z_coords = np.loadtxt('example_data.csv', unpack=True, dtype=float,delimiter='\t', skiprows=1)    
+    X_coords,Y_coords,Z_coords = np.loadtxt('example_data.csv', unpack=True, dtype=float,delimiter=' ', skiprows=1)    
 
     Points = np.column_stack((X_coords, Y_coords))
 
     #kwargs for the model see pykrige documentation for more details
-    model_kwargs = {'variogram_model': 'spherical', 
-                    'verbose': False, 
-                    'enable_plotting': False, 
-                    'exact_values':True, 
-                    'nlags':6
+    model_kwargs = {'variogram_model': 'gaussian', 
+                    'verbose': True, 
+                    'enable_plotting': True, 
+                    'exact_values':False, 
+                    'nlags':4
                     }
 
     # Initialize KRISPU with the data and model class any pykrige model class can be used
@@ -25,8 +25,8 @@ if __name__ == "__main__":
     krispu.get_stats()
 
     # Define grid
-    gridx = np.linspace(4, 11, 200)
-    gridy = np.linspace(4, 11, 200)
+    gridy = np.linspace(4, 16, 1000)
+    gridx = np.linspace(100, 400, 1000)
 
     #fit the model and predict
     z_map = krispu.fit(gridx, gridy)
@@ -38,7 +38,7 @@ if __name__ == "__main__":
     krispu.print_stats()
 
     #plotting
-    im = plt.imshow(z_map, extent=(gridx.min(), gridx.max(), gridy.min(), gridy.max()), origin='lower', cmap='viridis')
+    im = plt.imshow(z_map, extent=(gridx.min(), gridx.max(), gridy.min(), gridy.max()), origin='lower', cmap='viridis', aspect='auto')
     plt.colorbar(im, label='C parameter')
     plt.scatter(X_coords, Y_coords, c=Z_coords, label='Data Points', s=50, edgecolor='black')
     plt.xlabel('A parameter')
@@ -57,6 +57,8 @@ if __name__ == "__main__":
     # Plot both prediction and uncertainty
     im = plt.imshow(uncertainty, extent=(gridx.min(), gridx.max(), gridy.min(), gridy.max()), origin='lower', cmap='magma')
     plt.scatter(X_coords, Y_coords, c='red', label='Data Points', s=50)
+    im = plt.imshow(uncertainty, extent=(gridx.min(), gridx.max(), gridy.min(), gridy.max()), origin='lower', cmap='magma', aspect='auto')
+    plt.scatter(X_coords, Y_coords, c='red', s=50)
     plt.scatter(max_uncertainty_coords[0], max_uncertainty_coords[1], c='blue', label='Max Uncertainty', s=100, edgecolor='black')
     plt.colorbar(im, label='Uncertainty')
     plt.xlabel('A parameter')
