@@ -2,9 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import LeaveOneOut, KFold
 from pykrige.ok import OrdinaryKriging
+from pykrige.rk import RegressionKriging
 from Utilities import KLD,MSE,JSD
 from scipy.interpolate import griddata
 import warnings
+import cv2
 
 class KRISPU:
     """
@@ -21,6 +23,8 @@ class KRISPU:
         model_class (type): A pykrige model class (e.g., OrdinaryKriging, UniversalKriging).
         model_kwargs (dict): Parameters for the kriging model.
         splitter (object): A cross-validation splitter (e.g., LeaveOneOut, KFold).
+        n_boundary_points (int): Number of points at the beginning of X to treat as boundary points
+                                that should never be removed during cross-validation.
         uncertainty_points (tuple): Coordinates and uncertainties for each point.
         fitted_model (np.ndarray): The fitted kriging model over the grid.
         variance (np.ndarray): Variance of the predictions.
@@ -35,18 +39,21 @@ class KRISPU:
         get_stats(): Analyzes the variogram of the fitted model.
     """
 
-    def __init__(self, X, y, model_class, model_kwargs=None, splitter=LeaveOneOut()):
+    def __init__(self, X, y, model_class, model_kwargs=None, splitter=LeaveOneOut(), n_boundary_points=0):
         self.X = X
         self.y = y
         self.model_class = model_class
         self.model_kwargs = model_kwargs or {}
         self.splitter = splitter
+        self.n_boundary_points = n_boundary_points
         self.uncertainty_points = None
         self.fitted_model = None
         self.variance = None
         self.gridx = None
         self.gridy = None
         self.uncertainty_grid = None
+        self.regression_component = None  # Store regression component for RegressionKriging
+        self.kriging_component = None     # Store kriging component for RegressionKriging
         
         #check that X is 2D and that y is 1D and has the same length as X 
         if self.X.ndim != 2 or self.X.shape[1] != 2:
@@ -67,6 +74,10 @@ class KRISPU:
             raise ValueError("X must be of floating point type.")
         if not np.issubdtype(self.y.dtype, np.floating):
             raise ValueError("y must be of floating point type.")
+        if not isinstance(self.n_boundary_points, int) or self.n_boundary_points < 0:
+            raise ValueError("n_boundary_points must be a non-negative integer.")
+        if self.n_boundary_points >= self.X.shape[0]:
+            raise ValueError("n_boundary_points must be less than the total number of data points.")
         
         
     def fit(self, gridx, gridy):
@@ -91,10 +102,11 @@ class KRISPU:
         For each fold, removes one point, fits the model to the rest, predicts over the grid,
         computes the metric (e.g., KLD) between the full-data prediction and the leave-one-out prediction
         over the entire field, and assigns that uncertainty to the removed point.
+        
+        The first n_boundary_points are excluded from removal to maintain model stability.
 
         Returns:
-            uncertainties (np.ndarray): Uncertainty value for each original data point (shape: n_samples,).
-            mean_uncertainty (float): Mean uncertainty across all points.
+            sum_uncertainty (float): Sum of uncertainty across all evaluated points.
         """
         if metric is None:
             raise ValueError("A metric function must be provided for evaluation.")
@@ -106,6 +118,20 @@ class KRISPU:
         n_samples = self.X.shape[0]
         uncertainties = np.zeros(n_samples)
 
+        # Create subset of data excluding boundary points for cross-validation
+        if self.n_boundary_points > 0:
+            X_eval = self.X[self.n_boundary_points:]  # Points to evaluate (exclude boundary points)
+            y_eval = self.y[self.n_boundary_points:]
+            X_boundary = self.X[:self.n_boundary_points]  # Boundary points (always kept)
+            y_boundary = self.y[:self.n_boundary_points]
+            print(f"Excluding first {self.n_boundary_points} boundary points from cross-validation")
+            print(f"Evaluating {len(X_eval)} interior points")
+        else:
+            X_eval = self.X
+            y_eval = self.y
+            X_boundary = np.empty((0, 2))
+            y_boundary = np.empty(0)
+            print(f"Evaluating all {n_samples} points")
 
         # Fit model on all data to get "ground truth" grid
         model_full = self.model_class(
@@ -115,8 +141,22 @@ class KRISPU:
         z_true, _ = model_full.execute("grid", self.gridx, self.gridy)
         z_true_flat = z_true.ravel()
 
-        for idx, (train_index, test_index) in enumerate(self.splitter.split(self.X)):
-            X_train, y_train = self.X[train_index], self.y[train_index]
+        # Perform cross-validation only on non-boundary points
+        for idx in range(len(X_eval)):
+            # Create training set: all boundary points + all non-boundary points except current one
+            train_indices = np.concatenate([
+                np.arange(len(X_boundary)),  # All boundary points
+                np.arange(len(X_boundary), len(X_boundary) + len(X_eval))[np.arange(len(X_eval)) != idx]  # Other non-boundary points
+            ])
+            
+            # Combine boundary points with remaining evaluation points
+            if len(X_boundary) > 0:
+                X_train = np.vstack([X_boundary, X_eval[np.arange(len(X_eval)) != idx]])
+                y_train = np.concatenate([y_boundary, y_eval[np.arange(len(X_eval)) != idx]])
+            else:
+                X_train = X_eval[np.arange(len(X_eval)) != idx]
+                y_train = y_eval[np.arange(len(X_eval)) != idx]
+            
             model = self.model_class(
                 X_train[:, 0], X_train[:, 1], y_train, **self.model_kwargs
             )
@@ -125,14 +165,17 @@ class KRISPU:
 
             # Compute uncertainty over the whole field
             uncertainty = metric(z_true_flat, z_pred_flat)
-            # Assign this uncertainty to the removed point
-            uncertainties[test_index[0]] = uncertainty
+            # Assign this uncertainty to the removed point (accounting for boundary offset)
+            uncertainties[self.n_boundary_points + idx] = uncertainty
+
+        # Set boundary points uncertainty to zero (they were never removed)
+        if self.n_boundary_points > 0:
+            uncertainties[:self.n_boundary_points] = 0.0
 
         sum_uncertainty = np.sum(uncertainties)
         self.uncertainty_points = (self.X, uncertainties)
 
         print(f"sum uncertainty: {sum_uncertainty:.4f}")
-
 
         return sum_uncertainty
 
@@ -159,6 +202,77 @@ class KRISPU:
             z_grid = z_grid / np.nanmax(z_grid)
         self.uncertainty_grid = z_grid  # Normalize uncertainty values
         return z_grid
+    def pick_next_point(self, method='max',threshold=None):
+        """
+        Picks the next point to sample based on the uncertainty map.
+        
+        Parameters:
+            method (str): Method to pick the next point ('max', 'random', etc.).
+            kwargs (dict): Additional parameters for the method.
+        
+        Returns:
+            tuple: Coordinates of the next point to sample.
+        """
+        if self.uncertainty_grid is None:
+            raise ValueError("Uncertainty grid is not computed. Call evaluate() and generate_uncertainty_map() first.")
+        
+        if method == 'max':
+            if threshold is not None:
+                raise ValueError("Threshold is not applicable for 'max' method.")
+            max_index = np.unravel_index(np.argmax(self.uncertainty_grid), self.uncertainty_grid.shape)
+            return (self.gridx[max_index[1]], self.gridy[max_index[0]])
+        elif method == 'weighted_centroid':
+            if threshold is None:
+                raise ValueError("Threshold must be provided for 'weighted_centroid' method.")
+
+            # Create binary mask based on threshold
+            binary_mask = (self.uncertainty_grid >= threshold).astype(np.uint8)
+            
+            # Find connected components
+            num_labels, labels = cv2.connectedComponents(binary_mask)
+            
+            if num_labels <= 1:  # Only background found
+                # Fall back to max uncertainty point if no regions above threshold
+                max_index = np.unravel_index(np.argmax(self.uncertainty_grid), self.uncertainty_grid.shape)
+                return (self.gridx[max_index[1]], self.gridy[max_index[0]])
+            
+            # Find the largest connected component (excluding background label 0)
+            largest_area = 0
+            largest_label = 1
+            
+            for label in range(1, num_labels):
+                area = np.sum(labels == label)
+                if area > largest_area:
+                    largest_area = area
+                    largest_label = label
+            
+            # Get coordinates of the largest uncertain region
+            region_mask = (labels == largest_label)
+            region_coords = np.where(region_mask)
+            
+            # Get uncertainty values for this region
+            region_uncertainties = self.uncertainty_grid[region_coords]
+            
+            # Calculate weighted centroid
+            total_weight = np.sum(region_uncertainties)
+            if total_weight == 0:
+                # If weights are zero, use geometric centroid
+                centroid_y = np.mean(region_coords[0])
+                centroid_x = np.mean(region_coords[1])
+            else:
+                # Weighted centroid calculation
+                centroid_y = np.sum(region_coords[0] * region_uncertainties) / total_weight
+                centroid_x = np.sum(region_coords[1] * region_uncertainties) / total_weight
+            
+            # Convert grid indices to actual coordinates
+            # Ensure indices are within bounds
+            centroid_x = int(np.clip(centroid_x, 0, len(self.gridx) - 1))
+            centroid_y = int(np.clip(centroid_y, 0, len(self.gridy) - 1))
+            
+            return (self.gridx[centroid_x], self.gridy[centroid_y])
+
+        else:
+            raise ValueError(f"Unknown method: {method}")
     def print_stats(self):
         """
         Prints the statistics of the fitted model.
