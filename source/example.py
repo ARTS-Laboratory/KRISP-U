@@ -11,20 +11,64 @@ from scipy.spatial import ConvexHull
 from matplotlib.path import Path
 
 if __name__ == "__main__":
-    X_coords,Y_coords,Z_coords = np.loadtxt('example_data.csv', unpack=True, dtype=float,delimiter=' ', skiprows=1)    
+    X_coords,Y_coords,Z_coords = np.loadtxt('example_data2.csv', unpack=True, dtype=float,delimiter=' ', skiprows=1)    
 
     Points = np.column_stack((X_coords, Y_coords))
+
+    
 
     #kwargs for the model see pykrige documentation for more details
     model_kwargs = {'variogram_model': 'gaussian', 
                     'verbose': True, 
                     'enable_plotting': False, 
                     'exact_values':False, 
-                    'nlags':4
+                    'nlags':5,
+                    'anisotropy_scaling': 25,
                     }
 
+
+    #as a sanity check plot what it looks like scaled just use interpolation
+    # Initialize Ordinary Kriging for visualization
+    ok = UniversalKriging(X_coords, Y_coords, Z_coords, variogram_model=model_kwargs['variogram_model'],
+                        verbose=model_kwargs['verbose'], 
+                        enable_plotting=True, 
+                        exact_values=model_kwargs['exact_values'], 
+                        nlags=model_kwargs['nlags'],
+                        anisotropy_scaling=model_kwargs.get('anisotropy_scaling', 1))
+    # Define grid for visualization
+    gridy = np.linspace(4, 16, 1000)
+    gridx = np.linspace(100, 400, 1000)
+
+    z_map_ok, _ = ok.execute('grid', gridx, gridy)
+    # Create a mask for the convex hull
+    hull = ConvexHull(Points)
+    grid_x, grid_y = np.meshgrid(gridx, gridy)
+    grid_points = np.column_stack((grid_x.ravel(), grid_y.ravel()))
+    hull_path = Path(Points[hull.vertices])
+    inside_hull = hull_path.contains_points(grid_points).reshape(grid_x.shape)
+    # Apply convex hull mask to predictions
+    z_map_ok_masked = z_map_ok.copy()
+    z_map_ok_masked[~inside_hull] = np.nan
+    # Create a plot for Ordinary Kriging predictions
+    fig, ax = plt.subplots(figsize=(10, 8))
+    im = ax.imshow(z_map_ok_masked, extent=(gridx.min(), gridx.max(), gridy.min(), gridy.max()),
+                     origin='lower', cmap='viridis', aspect='auto')
+    ax.scatter(Points[:, 0], Points[:, 1], c='red', label='Data Points', s=100, edgecolor='black', linewidth=2)
+    ax.plot(Points[hull.vertices, 0], Points[hull.vertices, 1], 'k--', alpha=0.5, label='Convex Hull')
+    ax.plot(np.append(Points[hull.vertices, 0], Points[hull.vertices[0], 0]),
+                np.append(Points[hull.vertices, 1], Points[hull.vertices[0], 1]), 'k--', alpha=0.5)
+    ax.set_xlabel('A parameter')
+    ax.set_ylabel('B parameter')
+    ax.set_title(f'Ordinary Kriging Predictions Variogram: {model_kwargs.get("variogram_model", "hole-effect")}')
+    ax.legend()
+    plt.colorbar(im, ax=ax, label='C parameter')
+    plt.tight_layout()
+    plt.savefig('ordinary_kriging_predictions.png')
+    plt.show()
+
+
     # Initialize KRISPU with the data and model class any pykrige model class can be used
-    krispu = KRISPU(Points, Z_coords, model_class=UniversalKriging, model_kwargs=model_kwargs,n_boundary_points=5)
+    krispu = KRISPU(Points, Z_coords, model_class=UniversalKriging, model_kwargs=model_kwargs,n_boundary_points=4)
 
     krispu.get_stats()
 
@@ -107,7 +151,7 @@ if __name__ == "__main__":
                 np.append(Points[hull.vertices, 1], Points[hull.vertices[0], 1]), 'k--', alpha=0.5)
     axes[0].set_xlabel('A parameter')
     axes[0].set_ylabel('B parameter')
-    axes[0].set_title('A) Kriging Predictions')
+    axes[0].set_title(f'A) Kriging Predictions Variogram: {model_kwargs.get("variogram_model", "gaussian")}')
     axes[0].legend()
     plt.colorbar(im1, ax=axes[0], label='C parameter')
 

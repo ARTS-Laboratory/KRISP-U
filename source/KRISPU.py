@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import LeaveOneOut, KFold
 from pykrige.ok import OrdinaryKriging
+from pykrige.rk import RegressionKriging
 from Utilities import KLD,MSE,JSD
 from scipy.interpolate import griddata
 import warnings
@@ -51,6 +52,8 @@ class KRISPU:
         self.gridx = None
         self.gridy = None
         self.uncertainty_grid = None
+        self.regression_component = None  # Store regression component for RegressionKriging
+        self.kriging_component = None     # Store kriging component for RegressionKriging
         
         #check that X is 2D and that y is 1D and has the same length as X 
         if self.X.ndim != 2 or self.X.shape[1] != 2:

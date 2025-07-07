@@ -1,4 +1,5 @@
 import numpy as np
+import warnings
 
 def KLD(x_true, x_predicted):
     """
@@ -14,10 +15,25 @@ def KLD(x_true, x_predicted):
     x_true = np.array(x_true, dtype=np.float64)
     x_predicted = np.array(x_predicted, dtype=np.float64)
     
+    # Handle negative values by taking absolute value
+    x_true = np.abs(x_true)
+    x_predicted = np.abs(x_predicted)
+    
+    # Add small constant to avoid log(0) and division by 0
+    x_true = x_true + 1e-10
+    x_predicted = x_predicted + 1e-10
+    
     x_true = x_true / np.sum(x_true)  # Normalize true distribution
     x_predicted = x_predicted / np.sum(x_predicted)  # Normalize predicted distribution
-
-    return np.sum(x_true * np.log(x_true / x_predicted))
+    
+    # Compute KLD with additional NaN protection
+    result = np.sum(x_true * np.log(x_true / x_predicted))
+    
+    # Return 0 if result is NaN or infinite
+    if np.isnan(result) or np.isinf(result):
+        return 0.0
+    
+    return result
 
 
 
