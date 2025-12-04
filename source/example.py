@@ -11,7 +11,7 @@ from scipy.spatial import ConvexHull
 from matplotlib.path import Path
 
 if __name__ == "__main__":
-    X_coords,Y_coords,Z_coords = np.loadtxt('example_data3.csv', unpack=True, dtype=float,delimiter=' ', skiprows=1)    
+    X_coords,Y_coords,Z_coords = np.loadtxt('example_data2.csv', unpack=True, dtype=float,delimiter=' ', skiprows=1)    
 
     Points = np.column_stack((X_coords, Y_coords))
 
