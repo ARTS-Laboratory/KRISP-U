@@ -11,24 +11,23 @@ from scipy.spatial import ConvexHull
 from matplotlib.path import Path
 
 if __name__ == "__main__":
-    X_coords,Y_coords,Z_coords = np.loadtxt('example_data2.csv', unpack=True, dtype=float,delimiter=' ', skiprows=1)    
+    X_coords,Y_coords,Z_coords = np.loadtxt('example_data3.csv', unpack=True, dtype=float,delimiter=' ', skiprows=1)    
 
     Points = np.column_stack((X_coords, Y_coords))
 
-    
+    boundry_points = 3
 
     #kwargs for the model see pykrige documentation for more details
     model_kwargs = {'variogram_model': 'gaussian', 
                     'verbose': True, 
                     'enable_plotting': False, 
                     'exact_values':False, 
-                    'nlags':5,
-                    'anisotropy_scaling': 25,
+                    'nlags':4,
+                    'anisotropy_scaling': 3300,
                     }
 
 
     #as a sanity check plot what it looks like scaled just use interpolation
-    # Initialize Ordinary Kriging for visualization
     ok = UniversalKriging(X_coords, Y_coords, Z_coords, variogram_model=model_kwargs['variogram_model'],
                         verbose=model_kwargs['verbose'], 
                         enable_plotting=True, 
@@ -36,8 +35,8 @@ if __name__ == "__main__":
                         nlags=model_kwargs['nlags'],
                         anisotropy_scaling=model_kwargs.get('anisotropy_scaling', 1))
     # Define grid for visualization
-    gridy = np.linspace(4, 16, 1000)
-    gridx = np.linspace(100, 400, 1000)
+    gridy = np.linspace(1000, 5000, 1000)
+    gridx = np.linspace(0, 2, 1000)
 
     z_map_ok, _ = ok.execute('grid', gridx, gridy)
     # Create a mask for the convex hull
@@ -68,13 +67,10 @@ if __name__ == "__main__":
 
 
     # Initialize KRISPU with the data and model class any pykrige model class can be used
-    krispu = KRISPU(Points, Z_coords, model_class=UniversalKriging, model_kwargs=model_kwargs,n_boundary_points=4)
+    krispu = KRISPU(Points, Z_coords, model_class=UniversalKriging, model_kwargs=model_kwargs,n_boundary_points=boundry_points)
 
     krispu.get_stats()
 
-    # Define grid
-    gridy = np.linspace(4, 16, 1000)
-    gridx = np.linspace(100, 400, 1000)
 
     #fit the model and predict
     z_map = krispu.fit(gridx, gridy)
