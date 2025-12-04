@@ -22,9 +22,16 @@ if __name__ == "__main__":
                     'verbose': True, 
                     'enable_plotting': False, 
                     'exact_values':False, 
-                    'nlags':4,
-                    'anisotropy_scaling': 3300,
+                    'nlags':3,
+                    'anisotropy_scaling': 0.000305, #scaling applied in y direction 
                     }
+    
+    #if X and Y are diffrent units use anisotropy scaling value calculated below
+    x_range = np.max(X_coords) - np.min(X_coords)
+    y_range = np.max(Y_coords) - np.min(Y_coords)
+    anisotropy_scaling = x_range / y_range
+    print(f"Anisotropy scaling factor (y direction): {anisotropy_scaling}")
+
 
 
     #as a sanity check plot what it looks like scaled just use interpolation
