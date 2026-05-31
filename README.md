@@ -27,7 +27,7 @@ in bibtex:
   author       = {Matthew Burnett, and Austin Downey},   
   howpublished = {GitHub},  
   title        = {Kriging with Iterative Spatial Prediction of Uncertainty {(KRISP-U)} Algorithm},   
-  groups       = {{ARTS-Lab},  
+  groups       = {{ARTS-Lab}},  
   url          = {https://github.com/ARTS-Laboratory/KRISP-U},  
 }
 
