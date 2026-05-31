@@ -28,6 +28,7 @@ in bibtex:
   howpublished = {GitHub},  
   title        = {Kriging with Iterative Spatial Prediction of Uncertainty {(KRISP-U)} Algorithm},   
   groups       = {{ARTS-Lab}},  
+  note = {Accessed: 20xx-xx-xx},  
   url          = {https://github.com/ARTS-Laboratory/KRISP-U},  
 }
 
