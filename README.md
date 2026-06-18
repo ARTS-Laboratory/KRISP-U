@@ -1,5 +1,5 @@
 # KRISP-U
-KRISP-U
+Kriging with Iterative Spatial Prediction of Uncertainty (KRISP-U)
 
 
 
