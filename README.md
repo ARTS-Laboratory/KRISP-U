@@ -1,7 +1,7 @@
 # KRISP-U
 Kriging with Iterative Spatial Prediction of Uncertainty (KRISP-U)
 
-
+KRISP-U uses kriging with leave-one-out resampling and KL-divergence to estimate spatial uncertainty across a predictive model. It predicts both the expected field values and uncertainty, then recommends the next sampling location where uncertainty is highest to reduce the number of expensive experimental measurements needed.
 
 
 
