@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package
+        working-directory: versions/v0.2.0
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,plot]"
+      - name: Lint
+        working-directory: versions/v0.2.0
+        run: ruff check .
+      - name: Format check
+        working-directory: versions/v0.2.0
+        run: black --check .
+      - name: Tests
+        working-directory: versions/v0.2.0
+        run: pytest
+
+  legacy-smoke-test:
+    name: v0.1.0 import smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install historical package
+        working-directory: versions/v0.1.0
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Import and evaluate historical metric
+        run: >-
+          python -c "import numpy as np; from KRISPU import KRISPU;
+          from Utilities import KLD; value = KLD(np.array([1.0, 2.0]),
+          np.array([1.0, 2.0])); assert np.isfinite(value); assert value == 0.0"

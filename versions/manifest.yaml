@@ -1,0 +1,31 @@
+schema_version: 1
+generated: "2026-07-31"
+repository: "https://github.com/ARTS-Laboratory/KRISP-U"
+checksum_method: >-
+  SHA-256 of UTF-8 lines containing each file SHA-256, two spaces, and its
+  forward-slash relative path; records sorted by relative path and terminated
+  by a newline
+versions:
+  - version: "0.1.0"
+    directory: "versions/v0.1.0"
+    source_directory: "KRISP-U/source"
+    source_commit: "8e7530fee57cb0a511647d2bf9b5a3dce975f2a8"
+    git_tag: "v0.1.0"
+    method: >-
+      PyKrige field prediction with leave-one-out whole-field divergence and
+      interpolated uncertainty-based point selection
+    copied_code_data_extensions: [".py", ".csv"]
+    copied_code_data_files: 5
+    copied_code_data_sha256: "7dfc122a555d9a24a4e47cd21fc7a1917a7916a1c18c6d2218bc04e449739598"
+  - version: "0.2.0"
+    directory: "versions/v0.2.0"
+    source_directory: "KRISP-U_v02 pre-merge working tree"
+    source_branch: "archive/v0.2.0-premerge"
+    source_commit: "f31866b"
+    git_tag: "v0.2.0"
+    method: >-
+      Gaussian Process Regression active field reconstruction with continuous,
+      discrete, and hybrid candidate recommendation
+    copied_code_data_extensions: [".py", ".csv"]
+    copied_code_data_files: 28
+    copied_code_data_sha256: "60bc97b6a525269f8715f85f2d387a7b404e73d82c19f2ae447e12326816ced5"
