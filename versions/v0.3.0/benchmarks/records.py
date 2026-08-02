@@ -22,15 +22,22 @@ RECORD_FIELDS = [
     "max_absolute_error",
     "loo_calibration_factor",
     "mean_posterior_std",
-    "mean_jackknife_std",
+    "mean_loo_field_uncertainty",
     "mean_calibrated_posterior_std",
-    "mean_combined_std",
     "max_posterior_std",
-    "max_jackknife_std",
+    "max_loo_field_uncertainty",
     "max_calibrated_posterior_std",
-    "max_combined_std",
     "recommended_x",
     "recommended_y",
+    "distance_to_nearest_observation",
+    "distance_to_domain_boundary",
+    "near_domain_boundary",
+    "on_current_sample_hull",
+    "dominant_loo_observation_index",
+    "dominant_loo_observation_x",
+    "dominant_loo_observation_y",
+    "dominant_observation_is_anchor",
+    "dominant_observation_near_boundary",
     "wall_time_seconds",
 ]
 
@@ -55,9 +62,11 @@ def save_spatial_state(path: Path, state: Any) -> None:
     }
     for name in (
         "posterior_std",
-        "jackknife_std",
+        "loo_field_uncertainty",
+        "loo_field_means",
+        "loo_residuals",
+        "loo_standardized_residuals",
         "calibrated_posterior_std",
-        "combined_std",
     ):
         value = getattr(state, name)
         arrays[name] = np.asarray(value) if value is not None else np.array([], dtype=float)

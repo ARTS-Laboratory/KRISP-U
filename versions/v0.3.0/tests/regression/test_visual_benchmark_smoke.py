@@ -10,9 +10,11 @@ def test_visual_benchmark_smoke(tmp_path: Path) -> None:
     config = {
         "experiment_name": "test_smoke",
         "fields": ["smooth"],
-        "methods": ["krispu_combined", "posterior_std", "random"],
-        "initial_design": "corners_plus_center",
+        "methods": ["krispu_loo", "posterior_std", "random"],
+        "initial_design": "interior_maximin",
         "initial_sample_count": 5,
+        "initial_boundary_margin": 0.05,
+        "minimum_normalized_distance": 0.05,
         "final_budget": 7,
         "candidate_count": 32,
         "evaluation_grid_size": 12,

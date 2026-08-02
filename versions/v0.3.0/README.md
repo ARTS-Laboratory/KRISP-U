@@ -53,8 +53,8 @@ python -m benchmarks.runner --config benchmarks/configs/visual_audit.yaml
 
 Outputs are written only to `benchmark_outputs/<timestamp>_<experiment>/`.
 The audit uses the smooth, localized, and anisotropic fields; the methods
-`krispu_combined`, `krispu_jackknife`, `posterior_std`, `random`, `lhs`, and
-`maximin`; and the common five-point corners-plus-center initial design.
+`krispu_loo`, `posterior_std`, `random`, `lhs`, and `maximin`; and the common
+five-point interior maximin initial design.
 Metrics are RMSE, NRMSE, MAE, NMAE, R², p95 absolute error, and maximum
 absolute error. Every paired method shares the field, initial responses,
 candidate pool, evaluation grid, and budget, with separate recorded seeds.

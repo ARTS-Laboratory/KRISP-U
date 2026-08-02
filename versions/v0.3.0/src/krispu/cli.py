@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--n-recommendations", type=int, default=1)
     parser.add_argument("--n-candidates", type=int, default=2048)
-    parser.add_argument("--min-normalized-distance", type=float, default=0.0)
+    parser.add_argument("--min-normalized-distance", type=float, default=0.05)
     parser.add_argument("--random-state", type=int, default=0)
     parser.add_argument("--output", required=True)
     args = parser.parse_args(argv)
@@ -52,8 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         fieldnames = [
             "rank",
             *args.features,
-            "combined_std",
-            "jackknife_std",
+            "loo_field_uncertainty",
             "calibrated_posterior_std",
             "predicted_mean",
             "posterior_std",

@@ -26,27 +26,29 @@ from krispu.uncertainty.loo_bruteforce import compute_bruteforce_loo
 class KrispURecommender:
     """Recommend measurements where the reconstructed field is most uncertain.
 
-    The default score is the candidate-level combined KRISP-U uncertainty.  It
-    is not an objective optimizer and has no expected-improvement path.
+    The default score is candidate-level LOO field uncertainty. It is not an
+    objective optimizer and has no expected-improvement path.
     """
 
     def __init__(
         self,
         domain: CandidateDomain,
-        uncertainty: str = "loo_uncertainty",
+        uncertainty: str = "krispu_loo",
         gpr_config: GPRConfig | None = None,
         random_state: int | np.random.Generator | None = None,
         n_candidates: int = 2048,
         candidate_method: str = "lhs",
-        min_normalized_distance: float = 0.0,
+        min_normalized_distance: float = 0.05,
         excluded_regions: (
             Iterable[Callable[[NDArray[np.float64]], NDArray[np.bool_]]]
             | Callable[[NDArray[np.float64]], NDArray[np.bool_]]
             | None
         ) = None,
     ) -> None:
-        if uncertainty not in {"loo_uncertainty", "posterior_std"}:
-            raise ValueError("uncertainty must be 'loo_uncertainty' or explicit 'posterior_std'.")
+        if uncertainty == "loo_uncertainty":
+            uncertainty = "krispu_loo"
+        if uncertainty not in {"krispu_loo", "posterior_std"}:
+            raise ValueError("uncertainty must be 'krispu_loo' or explicit 'posterior_std'.")
         if n_candidates <= 0:
             raise ValueError("n_candidates must be positive.")
         if min_normalized_distance < 0:
@@ -85,14 +87,22 @@ class KrispURecommender:
             X_normalized=X_normalized,
             epsilon=self.gpr_config.response_epsilon,
         )
-        loo_mean, jackknife = jackknife_std(loo.field_means)
+        loo_mean, loo_field_uncertainty = jackknife_std(loo.field_means)
+        dominant_columns = np.argmax(
+            (loo.field_means - loo_mean[:, None]) ** 2,
+            axis=1,
+        )
+        dominant_indices = loo.loo_eligible_indices[dominant_columns]
+        dominant_coordinates = observations.X[dominant_indices].copy()
         calibration = loo_calibration_factor(loo.standardized_residuals)
-        calibrated, combined = combine_uncertainties(jackknife, posterior_std, calibration)
+        calibrated, combined = combine_uncertainties(
+            loo_field_uncertainty, posterior_std, calibration
+        )
         if not np.all(np.isfinite(predicted_mean)):
             raise FloatingPointError("predicted means are non-finite.")
         for name, value in (
             ("posterior standard deviations", posterior_std),
-            ("jackknife uncertainties", jackknife),
+            ("LOO field uncertainties", loo_field_uncertainty),
             ("calibrated posterior uncertainties", calibrated),
             ("combined uncertainties", combined),
         ):
@@ -107,7 +117,7 @@ class KrispURecommender:
             predicted_mean=predicted_mean,
             posterior_std=posterior_std,
             loo_mean=loo_mean,
-            jackknife_std=jackknife,
+            loo_field_uncertainty=loo_field_uncertainty,
             loo_calibration_factor=calibration,
             calibrated_posterior_std=calibrated,
             combined_std=combined,
@@ -116,6 +126,8 @@ class KrispURecommender:
             loo_residuals=loo.residuals,
             loo_standardized_residuals=loo.standardized_residuals,
             loo_eligible_indices=loo.loo_eligible_indices,
+            dominant_loo_observation_indices=dominant_indices,
+            dominant_loo_observation_coordinates=dominant_coordinates,
             heldout_predicted_mean=loo.heldout_means,
             heldout_predicted_std=loo.heldout_stds,
         )
@@ -162,7 +174,7 @@ class KrispURecommender:
         diagnostics = self.evaluate_uncertainty(observations, references)
         scores = (
             loo_uncertainty_scores(diagnostics)
-            if self.uncertainty == "loo_uncertainty"
+            if self.uncertainty == "krispu_loo"
             else posterior_std_scores(diagnostics)
         )
         # Scores must correspond to candidate rows. This explicit check avoids
@@ -183,7 +195,7 @@ class KrispURecommender:
                 acquisition_score=float(scores[index]),
                 predicted_mean=float(diagnostics.predicted_mean[index]),
                 posterior_std=float(diagnostics.posterior_std[index]),
-                jackknife_std=float(diagnostics.jackknife_std[index]),
+                loo_field_uncertainty=float(diagnostics.loo_field_uncertainty[index]),
                 calibrated_posterior_std=float(diagnostics.calibrated_posterior_std[index]),
                 combined_std=float(diagnostics.combined_std[index]),
                 distance_to_nearest_observation=float(distances[index]),

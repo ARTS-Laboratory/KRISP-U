@@ -15,9 +15,9 @@ settings, and all field, initial-design, candidate, and method seeds.
 
 The audit fields are the smooth multi-feature field, the localized-feature
 field, and the anisotropic field, all on `[-1, 1]^2`. The exact methods are
-`krispu_combined`, `krispu_jackknife`, `posterior_std`, `random`, `lhs`, and
+`krispu_loo`, `posterior_std`, `random`, `lhs`, and
 `maximin`. All methods in a paired trial share the hidden field, domain, five
-initial points (four corners plus the center), initial responses, candidate
+initial interior-maximin points, initial responses, candidate
 pool, evaluation grid, and final measurement budget.
 
 Field metrics are RMSE, NRMSE = RMSE / (max(true) - min(true)), MAE,
@@ -29,8 +29,8 @@ for baseline methods are left missing; they are never replaced by zero.
 The figures include six-panel field audits, uncertainty components, learning
 curves, sampling paths, uncertainty-versus-error scatters, error-concentration
 curves, component evolution, and paired final-performance differences. The
-jackknife/combined ratio uses a denominator floor of `1e-12` solely to avoid
-division by zero in plotting.
+LOO field uncertainty is plotted alongside GP posterior standard deviation;
+there is no combined-uncertainty acquisition or plot panel.
 
 The primary comparison is field reconstruction, not objective regret. The
 first benchmark is diagnostic: it is intended to reveal weaknesses in the

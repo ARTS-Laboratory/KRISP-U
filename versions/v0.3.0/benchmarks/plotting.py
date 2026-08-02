@@ -19,20 +19,21 @@ def plot_field_audit(state: Any, path: Path, save_pdf: bool = False) -> None:
     predicted = state.predicted_field.reshape(shape)
     error = state.metrics.absolute_error.reshape(shape)
     fields = [true, predicted, error, state.posterior_std.reshape(shape)]
-    labels = ["True hidden field", "Reconstructed field", "Absolute error", "Posterior std"]
-    if state.jackknife_std is not None:
-        fields += [state.jackknife_std.reshape(shape), state.combined_std.reshape(shape)]
-        labels += ["LOO jackknife uncertainty", "Combined KRISP-U uncertainty"]
-    else:
-        fields += [np.zeros(shape), np.zeros(shape)]
-        labels += [
-            "LOO jackknife uncertainty (not applicable)",
-            "Combined KRISP-U uncertainty (not applicable)",
-        ]
+    labels = [
+        "True field",
+        "Reconstructed field",
+        "Absolute reconstruction error",
+        "GP posterior std",
+    ]
+    if state.loo_field_uncertainty is None:
+        raise ValueError("The field audit requires LOO field uncertainty.")
+    fields.append(state.loo_field_uncertainty.reshape(shape))
+    labels.append("LOO field uncertainty")
     figure, axes = plt.subplots(2, 3, figsize=(13, 8), constrained_layout=True)
     related_limits = (float(np.min(true)), float(np.max(true)))
     error_limit = max(float(np.max(error)), np.finfo(float).eps)
-    for axis, values, label in zip(axes.flat, fields, labels, strict=True):
+    axes = np.asarray(axes).reshape(-1)
+    for axis, values, label in zip(axes[:5], fields, labels, strict=True):
         limits = (
             related_limits if label.startswith(("True", "Reconstructed")) else (0.0, error_limit)
         )
@@ -53,32 +54,54 @@ def plot_field_audit(state: Any, path: Path, save_pdf: bool = False) -> None:
         axis.set_xlabel("x")
         axis.set_ylabel("y")
         figure.colorbar(image, ax=axis, shrink=0.82)
+    axis = axes.flat[5]
+    axis.contourf(x, y, true, levels=16, cmap="Greys", alpha=0.55)
+    initial_count = state.initial_sample_count
+    axis.scatter(
+        state.observed_X[:initial_count, 0],
+        state.observed_X[:initial_count, 1],
+        c="white",
+        edgecolors="black",
+        s=30,
+        label="initial",
+    )
+    if len(state.observed_X) > initial_count:
+        adaptive = state.observed_X[initial_count:]
+        axis.scatter(
+            adaptive[:, 0],
+            adaptive[:, 1],
+            c=np.arange(len(adaptive)),
+            cmap="plasma",
+            s=30,
+            label="adaptive order",
+        )
+        for order, point in enumerate(adaptive, start=1):
+            axis.text(point[0], point[1], str(order), fontsize=7)
+    if state.recommended_point is not None:
+        axis.scatter(*state.recommended_point, marker="*", s=90, c="red", edgecolors="black")
+    axis.set(xlim=(-1, 1), ylim=(-1, 1), aspect="equal", title="Sample locations and order")
+    axis.legend(fontsize=7, loc="best")
     figure.suptitle(f"{state.field} | {state.method} | n={state.sample_count}")
     _save(figure, path, save_pdf)
 
 
 def plot_uncertainty_components(state: Any, path: Path, save_pdf: bool = False) -> None:
-    if state.combined_std is None:
+    if state.loo_field_uncertainty is None:
         return
     x, y, shape = _grid(state.evaluation_points)
-    ratio = state.jackknife_std / np.maximum(state.combined_std, 1e-12)
     values = [
         state.posterior_std,
-        state.jackknife_std,
+        state.loo_field_uncertainty,
         state.calibrated_posterior_std,
-        state.combined_std,
-        ratio,
         state.metrics.absolute_error,
     ]
     labels = [
         "posterior_std",
-        "jackknife_std",
+        "loo_field_uncertainty",
         "calibrated_posterior_std",
-        "combined_std",
-        "jackknife_std / combined_std",
         "absolute error",
     ]
-    figure, axes = plt.subplots(2, 3, figsize=(13, 8), constrained_layout=True)
+    figure, axes = plt.subplots(1, 4, figsize=(15, 4), constrained_layout=True)
     for axis, value, label in zip(axes.flat, values, labels, strict=True):
         image = axis.pcolormesh(x, y, value.reshape(shape), shading="auto", cmap="magma", vmin=0.0)
         axis.scatter(
@@ -147,17 +170,18 @@ def plot_sampling_paths(
     for axis, (method, state) in zip(axes, final_states.items(), strict=False):
         X, Y = grid_points[:, 0].reshape(shape), grid_points[:, 1].reshape(shape)
         axis.contourf(X, Y, values.reshape(shape), levels=levels, cmap="viridis")
+        initial_count = state.initial_sample_count
         axis.scatter(
-            state.observed_X[:5, 0],
-            state.observed_X[:5, 1],
+            state.observed_X[:initial_count, 0],
+            state.observed_X[:initial_count, 1],
             c="white",
             edgecolors="black",
             s=25,
             label="initial",
         )
-        if len(state.observed_X) > 5:
-            order = np.arange(len(state.observed_X) - 5)
-            points = state.observed_X[5:]
+        if len(state.observed_X) > initial_count:
+            order = np.arange(len(state.observed_X) - initial_count)
+            points = state.observed_X[initial_count:]
             scatter = axis.scatter(
                 points[:, 0], points[:, 1], c=order, cmap="plasma", s=28, label="adaptive"
             )
@@ -171,12 +195,11 @@ def plot_sampling_paths(
 
 def plot_uncertainty_error(state: Any, path: Path, save_pdf: bool = False) -> None:
     pairs = [
-        ("combined_std", state.combined_std),
         ("posterior_std", state.posterior_std),
-        ("jackknife_std", state.jackknife_std),
+        ("loo_field_uncertainty", state.loo_field_uncertainty),
         ("calibrated_posterior_std", state.calibrated_posterior_std),
     ]
-    figure, axes = plt.subplots(2, 2, figsize=(10, 8), constrained_layout=True)
+    figure, axes = plt.subplots(1, 3, figsize=(12, 4), constrained_layout=True)
     for axis, (label, uncertainty) in zip(axes.flat, pairs, strict=True):
         if uncertainty is None:
             axis.axis("off")
@@ -194,8 +217,7 @@ def plot_uncertainty_error(state: Any, path: Path, save_pdf: bool = False) -> No
 
 def plot_error_concentration(state: Any, path: Path, save_pdf: bool = False) -> None:
     candidates = [
-        ("combined_std", state.combined_std),
-        ("jackknife_std", state.jackknife_std),
+        ("loo_field_uncertainty", state.loo_field_uncertainty),
         ("posterior_std", state.posterior_std),
     ]
     figure, axis = plt.subplots(figsize=(7, 5), constrained_layout=True)
@@ -225,13 +247,12 @@ def plot_error_concentration(state: Any, path: Path, save_pdf: bool = False) -> 
 def plot_component_evolution(
     records: list[dict[str, Any]], path: Path, save_pdf: bool = False
 ) -> None:
-    rows = [row for row in records if row["method"] == "krispu_combined"]
+    rows = [row for row in records if row["method"] == "krispu_loo"]
     figure, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
     for key in (
         "mean_posterior_std",
-        "mean_jackknife_std",
+        "mean_loo_field_uncertainty",
         "mean_calibrated_posterior_std",
-        "mean_combined_std",
     ):
         values = [
             (int(row["sample_count"]), float(row[key]))
@@ -248,6 +269,83 @@ def plot_component_evolution(
     )
     axis.legend()
     axis.grid(alpha=0.25)
+    _save(figure, path, save_pdf)
+
+
+def plot_boundary_diagnostics(
+    records: list[dict[str, Any]], path: Path, save_pdf: bool = False
+) -> None:
+    """Plot boundary, hull, and nearest-observation selection diagnostics."""
+
+    adaptive = [row for row in records if row["recommended_x"] not in (None, "")]
+    counts = np.asarray([int(row["sample_count"]) for row in adaptive])
+    boundary = np.asarray([bool(row["near_domain_boundary"]) for row in adaptive], dtype=float)
+    hull = np.asarray([bool(row["on_current_sample_hull"]) for row in adaptive], dtype=float)
+    distances = np.asarray(
+        [float(row["distance_to_nearest_observation"]) for row in adaptive], dtype=float
+    )
+    figure, axes = plt.subplots(1, 3, figsize=(13, 4), constrained_layout=True)
+    if len(counts):
+        axes[0].plot(counts, np.cumsum(boundary) / np.arange(1, len(boundary) + 1), marker="o")
+        axes[1].plot(counts, np.cumsum(hull) / np.arange(1, len(hull) + 1), marker="o")
+        axes[2].plot(counts, distances, marker="o")
+    axes[0].set(title="Selections near domain boundary", ylabel="fraction")
+    axes[1].set(title="Selections becoming hull vertices", ylabel="fraction")
+    axes[2].set(title="Nearest-observation distance", ylabel="normalized distance")
+    for axis in axes:
+        axis.set_xlabel("sample count")
+        axis.grid(alpha=0.25)
+    _save(figure, path, save_pdf)
+
+
+def plot_dominant_loo_diagnostics(states: list[Any], path: Path, save_pdf: bool = False) -> None:
+    """Show LOO-spread maps and the fold driving selected iterations."""
+
+    selected = [state for state in states if state.recommended_point is not None]
+    if not selected:
+        return
+    selected = selected[:: max(1, len(selected) // 4)][:4]
+    figure, axes = plt.subplots(
+        1, len(selected), figsize=(4 * len(selected), 4), constrained_layout=True
+    )
+    axes = np.asarray(axes).reshape(-1)
+    for axis, state in zip(axes, selected, strict=True):
+        x, y, shape = _grid(state.evaluation_points)
+        values = state.loo_field_uncertainty.reshape(shape)
+        image = axis.pcolormesh(x, y, values, shading="auto", cmap="magma")
+        eligible = state.observed_loo_eligible
+        axis.scatter(
+            state.observed_X[eligible, 0],
+            state.observed_X[eligible, 1],
+            c="white",
+            edgecolors="black",
+            s=24,
+            label="LOO eligible",
+        )
+        if np.any(~eligible):
+            axis.scatter(
+                state.observed_X[~eligible, 0],
+                state.observed_X[~eligible, 1],
+                c="cyan",
+                marker="s",
+                edgecolors="black",
+                s=28,
+                label="protected anchor",
+            )
+        axis.scatter(
+            *state.recommended_point,
+            c="red",
+            marker="*",
+            s=100,
+            edgecolors="black",
+            label="next selected",
+        )
+        dominant = state.dominant_loo_observation_index
+        title = f"n={state.sample_count}; dominant fold={dominant}"
+        axis.set(xlim=(-1, 1), ylim=(-1, 1), aspect="equal", title=title)
+        axis.legend(fontsize=7, loc="best")
+        figure.colorbar(image, ax=axis, shrink=0.8, label="LOO field uncertainty")
+    figure.suptitle(f"Dominant LOO fold diagnostics | {selected[0].field}")
     _save(figure, path, save_pdf)
 
 

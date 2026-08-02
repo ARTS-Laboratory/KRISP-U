@@ -4,14 +4,15 @@ fields:
   - localized
   - anisotropic
 methods:
-  - krispu_combined
-  - krispu_jackknife
+  - krispu_loo
   - posterior_std
   - random
   - lhs
   - maximin
-initial_design: corners_plus_center
+initial_design: interior_maximin
 initial_sample_count: 5
+initial_boundary_margin: 0.05
+minimum_normalized_distance: 0.05
 final_budget: 12
 candidate_count: 256
 evaluation_grid_size: 35

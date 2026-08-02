@@ -21,7 +21,7 @@ def test_sequential_runner_records_shared_observations() -> None:
             9,
             field_name="smooth",
         )
-        for method in ("krispu_combined", "posterior_std", "random")
+        for method in ("krispu_loo", "posterior_std", "random")
     }
     for states in runs.values():
         assert [state.sample_count for state in states] == list(range(5, 8))
@@ -32,8 +32,8 @@ def test_sequential_runner_records_shared_observations() -> None:
         assert len(states[-1].predicted_field) == len(evaluation)
         for state in states:
             assert np.allclose(state.observed_y, field.evaluate(state.observed_X))
-    assert runs["krispu_combined"][0].jackknife_std is not None
-    assert runs["krispu_combined"][0].combined_std is not None
+    assert runs["krispu_loo"][0].loo_field_uncertainty is not None
+    assert runs["krispu_loo"][0].combined_std is not None
     assert runs["random"][0].jackknife_std is None
     assert runs["random"][0].combined_std is None
 
