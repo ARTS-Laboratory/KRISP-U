@@ -1,0 +1,8 @@
+cff-version: 1.2.0
+title: "KRISP-U v0.3.0"
+message: "If you use this software, please cite the repository and release."
+type: software
+authors:
+  - name: "ARTS Laboratory"
+repository-code: "https://github.com/ARTS-Laboratory/KRISP-U"
+version: "0.3.0"
