@@ -1,1 +1,1 @@
-"""Benchmark infrastructure will be added after the core reference backend."""
+"""Reproducible v0.3.0 performance-audit benchmark package."""

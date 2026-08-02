@@ -92,13 +92,14 @@ class KrispURecommender:
             raise FloatingPointError("predicted means are non-finite.")
         for name, value in (
             ("posterior standard deviations", posterior_std),
-            ("LOO means", loo_mean),
             ("jackknife uncertainties", jackknife),
             ("calibrated posterior uncertainties", calibrated),
             ("combined uncertainties", combined),
         ):
             if not np.all(np.isfinite(value)) or np.any(value < 0):
                 raise FloatingPointError(f"{name} are non-finite or negative.")
+        if not np.all(np.isfinite(loo_mean)):
+            raise FloatingPointError("LOO means are non-finite.")
         if not np.isfinite(calibration) or calibration < 0:
             raise FloatingPointError("LOO calibration factor is non-finite or negative.")
         return UncertaintyDiagnostics(

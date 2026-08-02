@@ -1,0 +1,25 @@
+experiment_name: visual_audit
+fields:
+  - smooth
+  - localized
+  - anisotropic
+methods:
+  - krispu_combined
+  - krispu_jackknife
+  - posterior_std
+  - random
+  - lhs
+  - maximin
+initial_design: corners_plus_center
+initial_sample_count: 5
+final_budget: 25
+candidate_count: 1024
+evaluation_grid_size: 80
+trials: 1
+base_seed: 42
+snapshot_sample_counts:
+  - 5
+  - 10
+  - 17
+  - 25
+save_pdf: true

@@ -1,0 +1,24 @@
+experiment_name: paired_smoke
+fields:
+  - smooth
+  - localized
+  - anisotropic
+methods:
+  - krispu_combined
+  - krispu_jackknife
+  - posterior_std
+  - random
+  - lhs
+  - maximin
+initial_design: corners_plus_center
+initial_sample_count: 5
+final_budget: 12
+candidate_count: 256
+evaluation_grid_size: 35
+trials: 5
+base_seed: 123
+snapshot_sample_counts:
+  - 5
+  - 8
+  - 12
+save_pdf: false

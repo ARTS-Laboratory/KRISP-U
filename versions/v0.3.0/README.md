@@ -6,10 +6,10 @@ eligible measurement using the same fitted kernel hyperparameters, predicts
 the complete candidate/reference field for every fold, and ranks candidates by
 the combined candidate-level uncertainty.
 
-The first pass intentionally stops at the auditable brute-force LOO core.
-Analytic LOO, conditional batch selection, and the paired random-field
-benchmark suite are deferred until this reference implementation has been
-validated.
+The first pass intentionally uses the auditable brute-force LOO core. Analytic
+LOO, conditional batch selection, and broad random-field generation remain
+deferred. The deterministic benchmark audit below is diagnostic rather than
+final performance evidence.
 
 Install from this directory:
 
@@ -33,3 +33,28 @@ print(result.recommendations[0].x)
 ```
 
 See `docs/algorithm.md` and `docs/uncertainty.md` for the exact method.
+
+Benchmark audit
+---------------
+
+From this directory, install the plotting and development dependencies and run
+the paired smoke audit:
+
+```bash
+python -m pip install -e ".[dev,plot]"
+python -m benchmarks.runner --config benchmarks/configs/paired_smoke.yaml
+```
+
+The larger visual audit is run with:
+
+```bash
+python -m benchmarks.runner --config benchmarks/configs/visual_audit.yaml
+```
+
+Outputs are written only to `benchmark_outputs/<timestamp>_<experiment>/`.
+The audit uses the smooth, localized, and anisotropic fields; the methods
+`krispu_combined`, `krispu_jackknife`, `posterior_std`, `random`, `lhs`, and
+`maximin`; and the common five-point corners-plus-center initial design.
+Metrics are RMSE, NRMSE, MAE, NMAE, R², p95 absolute error, and maximum
+absolute error. Every paired method shares the field, initial responses,
+candidate pool, evaluation grid, and budget, with separate recorded seeds.
