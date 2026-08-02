@@ -19,6 +19,7 @@ from krispu.kernels.specification import KernelSelectionConfig, parse_kernel_con
 from krispu.observations import ObservationSet
 from krispu.recommender import KrispURecommender
 from krispu.surrogates.gpr import GPRSurrogate
+from krispu.uncertainty.support import kernel_support_deficit
 
 
 @dataclass(frozen=True)
@@ -32,7 +33,10 @@ class SequentialState:
     true_field: NDArray[np.float64]
     predicted_field: NDArray[np.float64]
     posterior_std: NDArray[np.float64] | None
-    loo_field_uncertainty: NDArray[np.float64] | None
+    loo_field_sensitivity: NDArray[np.float64] | None
+    kernel_support_deficit: NDArray[np.float64] | None
+    krispu_uncertainty: NDArray[np.float64] | None
+    maximum_kernel_correlation_to_observations: NDArray[np.float64] | None
     loo_field_means: NDArray[np.float64] | None
     loo_residuals: NDArray[np.float64] | None
     loo_standardized_residuals: NDArray[np.float64] | None
@@ -45,6 +49,10 @@ class SequentialState:
     evaluation_points: NDArray[np.float64]
     recommended_point: NDArray[np.float64] | None
     distance_to_nearest_observation: float | None
+    loo_field_sensitivity_at_selection: float | None
+    kernel_support_deficit_at_selection: float | None
+    krispu_uncertainty_at_selection: float | None
+    maximum_kernel_correlation_at_selection: float | None
     distance_to_domain_boundary: float | None
     near_domain_boundary: bool | None
     on_current_sample_hull: bool | None
@@ -62,9 +70,15 @@ class SequentialState:
 
     @property
     def jackknife_std(self) -> NDArray[np.float64] | None:
-        """Compatibility alias for the LOO field uncertainty."""
+        """Compatibility alias for LOO field sensitivity."""
 
-        return self.loo_field_uncertainty
+        return self.loo_field_sensitivity
+
+    @property
+    def loo_field_uncertainty(self) -> NDArray[np.float64] | None:
+        """Deprecated compatibility alias for LOO field sensitivity."""
+
+        return self.loo_field_sensitivity
 
     def scalar_record(self) -> dict[str, object]:
         def mean(value: NDArray[np.float64] | None) -> float | None:
@@ -85,20 +99,27 @@ class SequentialState:
             "r2": self.metrics.r2,
             "p95_absolute_error": self.metrics.p95_absolute_error,
             "max_absolute_error": self.metrics.max_absolute_error,
-            "loo_calibration_factor": self.loo_calibration_factor,
             "mean_posterior_std": mean(self.posterior_std),
-            "mean_loo_field_uncertainty": mean(self.loo_field_uncertainty),
-            "mean_calibrated_posterior_std": mean(self.calibrated_posterior_std),
+            "mean_loo_field_sensitivity": mean(self.loo_field_sensitivity),
+            "mean_kernel_support_deficit": mean(self.kernel_support_deficit),
+            "mean_krispu_uncertainty": mean(self.krispu_uncertainty),
             "max_posterior_std": maximum(self.posterior_std),
-            "max_loo_field_uncertainty": maximum(self.loo_field_uncertainty),
-            "max_calibrated_posterior_std": maximum(self.calibrated_posterior_std),
+            "max_loo_field_sensitivity": maximum(self.loo_field_sensitivity),
+            "max_kernel_support_deficit": maximum(self.kernel_support_deficit),
+            "max_krispu_uncertainty": maximum(self.krispu_uncertainty),
             "recommended_x": (
                 None if self.recommended_point is None else float(self.recommended_point[0])
             ),
             "recommended_y": (
                 None if self.recommended_point is None else float(self.recommended_point[1])
             ),
-            "distance_to_nearest_observation": self.distance_to_nearest_observation,
+            "nearest_normalized_distance": self.distance_to_nearest_observation,
+            "loo_field_sensitivity_at_selection": self.loo_field_sensitivity_at_selection,
+            "kernel_support_deficit_at_selection": self.kernel_support_deficit_at_selection,
+            "krispu_uncertainty_at_selection": self.krispu_uncertainty_at_selection,
+            "maximum_kernel_correlation_to_observations": (
+                self.maximum_kernel_correlation_at_selection
+            ),
             "distance_to_domain_boundary": self.distance_to_domain_boundary,
             "near_domain_boundary": self.near_domain_boundary,
             "on_current_sample_hull": self.on_current_sample_hull,
@@ -140,7 +161,7 @@ def run_sequential_design(
     gpr_config: GPRConfig | None = None,
     metrics_function: Callable[[ArrayLike, ArrayLike], Any] | None = None,
     initial_loo_eligible: ArrayLike | None = None,
-    minimum_normalized_distance: float = 0.05,
+    minimum_normalized_distance: float = 1.0e-4,
     boundary_margin: float = 0.05,
     kernel_selection_config: KernelSelectionConfig | dict[str, Any] | None = None,
     kernel_schedule: dict[int, str | tuple[str, Any]] | None = None,
@@ -148,7 +169,18 @@ def run_sequential_design(
 ) -> list[SequentialState]:
     """Run one paired-trial method with one fixed candidate pool."""
 
-    supported = {"krispu_loo", "posterior_std", "random", "lhs", "maximin"}
+    method = {
+        "krispu_loo": "support_adjusted_krispu",
+        "loo_uncertainty": "support_adjusted_krispu",
+    }.get(method, method)
+    supported = {
+        "support_adjusted_krispu",
+        "raw_loo_sensitivity",
+        "posterior_std",
+        "random",
+        "lhs",
+        "maximin",
+    }
     if method not in supported:
         raise ValueError(f"Unknown sequential method: {method}")
     if minimum_normalized_distance < 0 or boundary_margin < 0:
@@ -258,10 +290,10 @@ def run_sequential_design(
                 kernel=selection_result.fitted_kernel,
                 optimize_hyperparameters=False,
             )
-        if method == "krispu_loo":
+        if method in {"support_adjusted_krispu", "raw_loo_sensitivity"}:
             recommender = KrispURecommender(
                 domain,
-                uncertainty="krispu_loo",
+                uncertainty=method,
                 gpr_config=step_config,
                 random_state=random_state,
                 n_candidates=len(pool),
@@ -274,6 +306,12 @@ def run_sequential_design(
         else:
             surrogate = GPRSurrogate(step_config).fit(domain.normalize(observed_X), observed_y)
             predicted, posterior = surrogate.predict(domain.normalize(reference))
+            support_full, correlation_full = kernel_support_deficit(
+                surrogate,
+                domain.normalize(observed_X),
+                domain.normalize(reference),
+                epsilon=step_config.response_epsilon,
+            )
             fitted_kernel_for_state = surrogate.frozen_kernel
 
         predicted_full = predicted
@@ -281,17 +319,29 @@ def run_sequential_design(
         predicted = predicted_full[:n_evaluation]
         posterior = posterior_full[:n_evaluation]
         if diagnostics is not None:
-            loo_uncertainty = diagnostics.loo_field_uncertainty[:n_evaluation]
+            loo_sensitivity = diagnostics.loo_field_sensitivity[:n_evaluation]
+            support_deficit = diagnostics.kernel_support_deficit[:n_evaluation]
+            krispu = diagnostics.krispu_uncertainty[:n_evaluation]
+            maximum_correlation = (
+                diagnostics.maximum_kernel_correlation_to_observations[:n_evaluation]
+            )
             loo_means = diagnostics.loo_field_means[:n_evaluation]
             loo_residuals = diagnostics.loo_residuals.copy()
             loo_standardized = diagnostics.loo_standardized_residuals.copy()
-            candidate_scores = diagnostics.loo_field_uncertainty[n_evaluation:]
+            candidate_scores = (
+                diagnostics.krispu_uncertainty[n_evaluation:]
+                if method == "support_adjusted_krispu"
+                else diagnostics.loo_field_sensitivity[n_evaluation:]
+            )
             calibrated = diagnostics.calibrated_posterior_std[:n_evaluation]
             combined = diagnostics.combined_std[:n_evaluation]
             calibration = diagnostics.loo_calibration_factor
             candidate_dominant_indices = diagnostics.dominant_loo_observation_indices[n_evaluation:]
         else:
-            loo_uncertainty = loo_means = loo_residuals = loo_standardized = None
+            loo_sensitivity = krispu = None
+            support_deficit = support_full[:n_evaluation]
+            maximum_correlation = correlation_full[:n_evaluation]
+            loo_means = loo_residuals = loo_standardized = None
             candidate_scores = posterior_full[n_evaluation:]
             calibrated = combined = None
             calibration = None
@@ -301,7 +351,7 @@ def run_sequential_design(
         next_point = None
         selection = None
         if len(observed_X) < final_budget:
-            if method in {"krispu_loo", "posterior_std"}:
+            if method in {"support_adjusted_krispu", "raw_loo_sensitivity", "posterior_std"}:
                 selection = _best_available(
                     pool,
                     available,
@@ -345,6 +395,22 @@ def run_sequential_design(
             next_point,
             boundary_margin,
         )
+        selected_sensitivity = None
+        selected_support = None
+        selected_krispu = None
+        selected_correlation = None
+        if selection is not None:
+            candidate_index = n_evaluation + selection
+            if diagnostics is not None:
+                selected_sensitivity = float(diagnostics.loo_field_sensitivity[candidate_index])
+                selected_support = float(diagnostics.kernel_support_deficit[candidate_index])
+                selected_krispu = float(diagnostics.krispu_uncertainty[candidate_index])
+                selected_correlation = float(
+                    diagnostics.maximum_kernel_correlation_to_observations[candidate_index]
+                )
+            else:
+                selected_support = float(support_full[candidate_index])
+                selected_correlation = float(correlation_full[candidate_index])
         dominant_index = None
         dominant_coordinate = None
         dominant_anchor = None
@@ -364,7 +430,14 @@ def run_sequential_design(
             true_field=true_values.copy(),
             predicted_field=predicted.copy(),
             posterior_std=posterior.copy(),
-            loo_field_uncertainty=None if loo_uncertainty is None else loo_uncertainty.copy(),
+            loo_field_sensitivity=None if loo_sensitivity is None else loo_sensitivity.copy(),
+            kernel_support_deficit=(
+                None if support_deficit is None else support_deficit.copy()
+            ),
+            krispu_uncertainty=None if krispu is None else krispu.copy(),
+            maximum_kernel_correlation_to_observations=(
+                None if maximum_correlation is None else maximum_correlation.copy()
+            ),
             loo_field_means=None if loo_means is None else loo_means.copy(),
             loo_residuals=None if loo_residuals is None else loo_residuals.copy(),
             loo_standardized_residuals=(
@@ -379,6 +452,10 @@ def run_sequential_design(
             evaluation_points=evaluation.copy(),
             recommended_point=next_point,
             distance_to_nearest_observation=selection_values[0],
+            loo_field_sensitivity_at_selection=selected_sensitivity,
+            kernel_support_deficit_at_selection=selected_support,
+            krispu_uncertainty_at_selection=selected_krispu,
+            maximum_kernel_correlation_at_selection=selected_correlation,
             distance_to_domain_boundary=selection_values[1],
             near_domain_boundary=selection_values[2],
             on_current_sample_hull=selection_values[3],
@@ -420,7 +497,7 @@ def _best_available(
     scores: NDArray[np.float64] | None,
     domain: CandidateDomain,
     observed_X: NDArray[np.float64],
-    minimum_normalized_distance: float = 0.05,
+    minimum_normalized_distance: float = 1.0e-4,
 ) -> int:
     """Return the highest-scoring candidate that passes current validity rules."""
 

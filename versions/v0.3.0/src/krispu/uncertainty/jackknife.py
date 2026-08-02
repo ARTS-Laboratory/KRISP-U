@@ -1,4 +1,4 @@
-"""Jackknife and LOO residual calibration equations."""
+"""LOO field sensitivity and residual diagnostics."""
 
 from __future__ import annotations
 
@@ -6,8 +6,10 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 
-def jackknife_std(field_means: ArrayLike) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return ``(mean, U_jack)`` for a ``(reference, loo)`` matrix."""
+def loo_field_sensitivity(
+    field_means: ArrayLike,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return ``(mean, S_LOO)`` for a ``(reference, loo)`` matrix."""
 
     values = np.asarray(field_means, dtype=float)
     if values.ndim != 2 or values.shape[1] == 0:
@@ -20,6 +22,12 @@ def jackknife_std(field_means: ArrayLike) -> tuple[NDArray[np.float64], NDArray[
     return mean, spread
 
 
+def jackknife_std(field_means: ArrayLike) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Compatibility alias for :func:`loo_field_sensitivity`."""
+
+    return loo_field_sensitivity(field_means)
+
+
 def loo_calibration_factor(standardized_residuals: ArrayLike) -> float:
     """Return ``sqrt(median(z_i**2))`` without hiding invalid residuals."""
 
@@ -30,25 +38,3 @@ def loo_calibration_factor(standardized_residuals: ArrayLike) -> float:
     if not np.isfinite(factor):
         raise FloatingPointError("LOO calibration factor is non-finite.")
     return factor
-
-
-def combine_uncertainties(
-    jackknife: ArrayLike,
-    posterior_std: ArrayLike,
-    calibration_factor: float,
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return ``(calibrated_posterior_std, combined_std)``."""
-
-    jack = np.asarray(jackknife, dtype=float).reshape(-1)
-    posterior = np.asarray(posterior_std, dtype=float).reshape(-1)
-    if (
-        jack.shape != posterior.shape
-        or not np.all(np.isfinite(jack))
-        or not np.all(np.isfinite(posterior))
-    ):
-        raise ValueError("uncertainty arrays must have matching finite shapes.")
-    if calibration_factor < 0 or not np.isfinite(calibration_factor):
-        raise ValueError("calibration_factor must be finite and non-negative.")
-    calibrated = calibration_factor * np.maximum(posterior, 0.0)
-    combined = np.sqrt(np.maximum(jack, 0.0) ** 2 + calibrated**2)
-    return calibrated, combined

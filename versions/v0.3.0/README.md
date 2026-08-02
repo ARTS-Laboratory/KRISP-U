@@ -4,7 +4,7 @@ This version implements KRISP-U as a field-reconstruction method.  It fits a
 response-standardized Matérn-3/2 ARD Gaussian process, removes each explicitly
 eligible measurement using the same fitted kernel hyperparameters, predicts
 the complete candidate/reference field for every fold, and ranks candidates by
-the combined candidate-level uncertainty.
+support-adjusted KRISP-U uncertainty.
 
 The first pass intentionally uses the auditable brute-force LOO core. Analytic
 LOO, conditional batch selection, and broad random-field generation remain
@@ -52,8 +52,9 @@ python -m benchmarks.runner --config benchmarks/configs/visual_audit.yaml
 ```
 
 Outputs are written only to `benchmark_outputs/<timestamp>_<experiment>/`.
-The audit uses the smooth, localized, and anisotropic fields; the methods
-`krispu_loo`, `posterior_std`, `random`, `lhs`, and `maximin`; and the common
+The audit uses smooth, localized, anisotropic, rough-correlated, and
+rough-multiscale fields; the methods `raw_loo_sensitivity`,
+`support_adjusted_krispu`, `posterior_std`, `random`, `lhs`, and `maximin`; and the common
 five-point interior maximin initial design.
 Metrics are RMSE, NRMSE, MAE, NMAE, R², p95 absolute error, and maximum
 absolute error. Every paired method shares the field, initial responses,

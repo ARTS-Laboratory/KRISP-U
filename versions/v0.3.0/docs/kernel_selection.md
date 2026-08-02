@@ -1,8 +1,8 @@
 # Kernel selection in v0.3.0
 
 Kernel selection changes only the reconstruction model used to generate the
-LOO fields. The canonical KRISP-U acquisition remains the candidate-level LOO
-field uncertainty; no posterior standard deviation is added to that score.
+LOO fields. The canonical KRISP-U acquisition remains support-adjusted
+KRISP-U uncertainty; no posterior standard deviation is added to that score.
 
 ## Modes and registry
 
@@ -56,5 +56,6 @@ The deterministic profile default is used below six observations. Candidates
 are reevaluated every three new measurements by default, and a challenger
 must improve the lower-is-better score by at least `0.05` to replace the
 current family. Study A compares complete workflows. Study B replays the
-selected family at each sample count across `krispu_loo`, posterior standard
-deviation, random, LHS, and maximin to isolate acquisition behavior.
+selected family at each sample count across `raw_loo_sensitivity`,
+`support_adjusted_krispu`, posterior standard deviation, random, LHS, and
+maximin to isolate acquisition behavior.

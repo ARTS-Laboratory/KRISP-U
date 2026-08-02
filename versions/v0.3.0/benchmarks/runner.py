@@ -56,7 +56,15 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
         config["fields"] = [
             field for field in config["fields"] if field not in {"noisy", "noisy_baseline"}
         ]
+    config["methods"] = [
+        {
+            "krispu_loo": "support_adjusted_krispu",
+            "loo_uncertainty": "support_adjusted_krispu",
+        }.get(method, method)
+        for method in config["methods"]
+    ]
     _validate_config(config)
+    minimum_normalized_distance = _minimum_normalized_distance(config)
     output = _prepare_benchmark_output(output_root, config["experiment_name"])
     figure_dirs = {
         name: output / "figures" / name
@@ -139,7 +147,7 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
                     true_evaluation=true_evaluation,
                     gpr_config=GPRConfig(random_state=method_seed),
                     initial_loo_eligible=initial_loo_eligible,
-                    minimum_normalized_distance=float(config["minimum_normalized_distance"]),
+                    minimum_normalized_distance=minimum_normalized_distance,
                     boundary_margin=float(config["initial_boundary_margin"]),
                 )
                 final_state = states[-1]
@@ -168,7 +176,7 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
                         ),
                         save_snapshot_gif=bool(config.get("save_snapshot_gifs", True)),
                     )
-                if method == "krispu_loo" and trial == 0:
+                if method == "support_adjusted_krispu" and trial == 0:
                     diagnostic_states.setdefault(field_name, []).extend(states)
                     snapshot_counts = {
                         int(value) for value in config.get("snapshot_sample_counts", [])
@@ -181,7 +189,7 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
                                 / f"{field_name}_n{state.sample_count}.png",
                                 bool(config.get("save_pdf", False)),
                             )
-                if method == "krispu_loo" and trial == 0:
+                if method == "support_adjusted_krispu" and trial == 0:
                     mid_state = states[min(len(states) - 1, max(0, len(states) // 2))]
                     plot_uncertainty_components(
                         mid_state,
@@ -198,16 +206,16 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
                         figure_dirs["uncertainty_error"] / f"{field_name}_error_concentration.png",
                         bool(config.get("save_pdf", False)),
                     )
-            for baseline in ("posterior_std", "random", "lhs", "maximin"):
-                if baseline in field_final and "krispu_loo" in field_final:
+            for baseline in ("raw_loo_sensitivity", "posterior_std", "random", "lhs", "maximin"):
+                if baseline in field_final and "support_adjusted_krispu" in field_final:
                     paired_rows.append(
                         {
                             "field": field_name,
                             "trial": trial,
                             "baseline": baseline,
-                            "delta_nrmse": field_final["krispu_loo"].metrics.nrmse
+                            "delta_nrmse": field_final["support_adjusted_krispu"].metrics.nrmse
                             - field_final[baseline].metrics.nrmse,
-                            "krispu_nrmse": field_final["krispu_loo"].metrics.nrmse,
+                            "krispu_nrmse": field_final["support_adjusted_krispu"].metrics.nrmse,
                             "baseline_nrmse": field_final[baseline].metrics.nrmse,
                         }
                     )
@@ -263,6 +271,8 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
             "fraction_near_boundary",
             "fraction_hull_vertices",
             "median_nearest_observation_distance",
+            "fraction_selections_within_0_05_normalized_distance",
+            "fraction_selections_kernel_correlation_above_0_95",
         ],
     )
     for row in summary_records:
@@ -305,7 +315,6 @@ def _validate_config(config: dict[str, Any]) -> None:
         "initial_design",
         "initial_sample_count",
         "initial_boundary_margin",
-        "minimum_normalized_distance",
         "final_budget",
         "candidate_count",
         "evaluation_grid_size",
@@ -319,7 +328,16 @@ def _validate_config(config: dict[str, Any]) -> None:
     if unknown_fields:
         raise ValueError(f"Unknown fields: {sorted(unknown_fields)}")
     unknown_methods = set(config["methods"]).difference(
-        {"krispu_loo", "posterior_std", "random", "lhs", "maximin"}
+        {
+            "support_adjusted_krispu",
+            "raw_loo_sensitivity",
+            "posterior_std",
+            "random",
+            "lhs",
+            "maximin",
+            "krispu_loo",
+            "loo_uncertainty",
+        }
     )
     if unknown_methods:
         raise ValueError(f"Unknown methods: {sorted(unknown_methods)}")
@@ -329,7 +347,7 @@ def _validate_config(config: dict[str, Any]) -> None:
         raise ValueError("initial_design must be interior_maximin or anchored_boundary.")
     if not 0 <= float(config["initial_boundary_margin"]) < 0.5:
         raise ValueError("initial_boundary_margin must be in [0, 0.5).")
-    if float(config["minimum_normalized_distance"]) < 0:
+    if _minimum_normalized_distance(config) < 0:
         raise ValueError("minimum_normalized_distance must be non-negative.")
     if int(config["final_budget"]) < int(config["initial_sample_count"]):
         raise ValueError("final_budget must be at least initial_sample_count.")
@@ -407,9 +425,14 @@ def _summary_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if row["on_current_sample_hull"] not in (None, "")
         ]
         distances = [
-            float(row["distance_to_nearest_observation"])
+            float(row["nearest_normalized_distance"])
             for row in rows
-            if row["distance_to_nearest_observation"] not in (None, "")
+            if row["nearest_normalized_distance"] not in (None, "")
+        ]
+        correlations = [
+            float(row["maximum_kernel_correlation_to_observations"])
+            for row in rows
+            if row["maximum_kernel_correlation_to_observations"] not in (None, "")
         ]
         summaries.append(
             {
@@ -424,9 +447,27 @@ def _summary_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "median_nearest_observation_distance": (
                     float(np.median(distances)) if distances else None
                 ),
+                "fraction_selections_within_0_05_normalized_distance": (
+                    float(np.mean(np.asarray(distances) <= 0.05)) if distances else None
+                ),
+                "fraction_selections_kernel_correlation_above_0_95": (
+                    float(np.mean(np.asarray(correlations) > 0.95)) if correlations else None
+                ),
             }
         )
     return summaries
+
+
+def _minimum_normalized_distance(config: dict[str, Any]) -> float:
+    candidate_validity = config.get("candidate_validity", {})
+    value = candidate_validity.get(
+        "minimum_normalized_distance",
+        config.get("minimum_normalized_distance", 1.0e-4),
+    )
+    result = float(value)
+    if not np.isfinite(result) or result < 0:
+        raise ValueError("minimum_normalized_distance must be finite and non-negative.")
+    return result
 
 
 def _regular_grid(domain: Any, size: int) -> np.ndarray:

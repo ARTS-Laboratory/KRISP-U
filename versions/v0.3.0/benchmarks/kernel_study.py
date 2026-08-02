@@ -32,7 +32,14 @@ MODE_NAMES = (
     "hybrid_correct_profile",
     "hybrid_broad_profile",
 )
-BASELINE_METHODS = ("krispu_loo", "posterior_std", "random", "lhs", "maximin")
+BASELINE_METHODS = (
+    "raw_loo_sensitivity",
+    "support_adjusted_krispu",
+    "posterior_std",
+    "random",
+    "lhs",
+    "maximin",
+)
 
 
 def run_kernel_selection_study(
@@ -79,14 +86,14 @@ def run_kernel_selection_study(
                     initial,
                     candidate_pool,
                     evaluation,
-                    "krispu_loo",
+                    "support_adjusted_krispu",
                     int(config["final_budget"]),
                     trial_seed + 100 + mode_index,
                     field_name=field_name,
                     trial=trial,
                     true_evaluation=true_evaluation,
                     gpr_config=GPRConfig(alpha=1e-6, random_state=trial_seed + 100 + mode_index),
-                    minimum_normalized_distance=float(config["minimum_normalized_distance"]),
+                    minimum_normalized_distance=_minimum_normalized_distance(config),
                     boundary_margin=float(config["initial_boundary_margin"]),
                     kernel_selection_config=mode_config,
                     selection_mode_label=mode,
@@ -173,7 +180,7 @@ def run_kernel_selection_study(
                     trial=trial,
                     true_evaluation=true_evaluation,
                     gpr_config=GPRConfig(alpha=1.0, random_state=trial_seed + 500 + method_index),
-                    minimum_normalized_distance=float(config["minimum_normalized_distance"]),
+                    minimum_normalized_distance=_minimum_normalized_distance(config),
                     boundary_margin=float(config["initial_boundary_margin"]),
                     kernel_schedule=schedule,
                     selection_mode_label=f"acquisition_isolation_{method}",
@@ -187,8 +194,8 @@ def run_kernel_selection_study(
                     study_b_rows.append(row)
                     if state.sample_count == int(config["final_budget"]):
                         study_b_final.append(row)
-            loo_final = isolated["krispu_loo"][-1]
-            for method in BASELINE_METHODS[1:]:
+            loo_final = isolated["support_adjusted_krispu"][-1]
+            for method in (item for item in BASELINE_METHODS if item != "support_adjusted_krispu"):
                 baseline_final = isolated[method][-1]
                 paired_rows.append(
                     {
@@ -380,6 +387,22 @@ def _auc_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result = []
     for (field, mode, trial), values in grouped.items():
         values.sort(key=lambda row: int(row["sample_count"]))
+        distances = np.asarray(
+            [
+                float(row["nearest_normalized_distance"])
+                for row in values
+                if row.get("nearest_normalized_distance") not in (None, "")
+            ],
+            dtype=float,
+        )
+        correlations = np.asarray(
+            [
+                float(row["maximum_kernel_correlation_to_observations"])
+                for row in values
+                if row.get("maximum_kernel_correlation_to_observations") not in (None, "")
+            ],
+            dtype=float,
+        )
         result.append(
             {
                 "field": field,
@@ -392,6 +415,15 @@ def _auc_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     )
                 ),
                 "final_nrmse": float(values[-1]["nrmse"]),
+                "median_nearest_normalized_distance": (
+                    float(np.median(distances)) if len(distances) else np.nan
+                ),
+                "fraction_selections_within_0_05_normalized_distance": (
+                    float(np.mean(distances <= 0.05)) if len(distances) else np.nan
+                ),
+                "fraction_selections_kernel_correlation_above_0_95": (
+                    float(np.mean(correlations > 0.95)) if len(correlations) else np.nan
+                ),
             }
         )
     return result
@@ -772,7 +804,6 @@ def _validate_study_config(config: dict[str, Any]) -> None:
         "fields",
         "initial_sample_count",
         "initial_boundary_margin",
-        "minimum_normalized_distance",
         "final_budget",
         "candidate_count",
         "evaluation_grid_size",
@@ -786,5 +817,18 @@ def _validate_study_config(config: dict[str, Any]) -> None:
     unknown = set(config["fields"]).difference(FIELD_FACTORIES)
     if unknown:
         raise ValueError(f"Unknown kernel-study fields: {sorted(unknown)}")
+    _minimum_normalized_distance(config)
     if int(config["initial_sample_count"]) < 3:
         raise ValueError("initial_sample_count must support a fitted surrogate.")
+
+
+def _minimum_normalized_distance(config: dict[str, Any]) -> float:
+    candidate_validity = config.get("candidate_validity", {})
+    value = candidate_validity.get(
+        "minimum_normalized_distance",
+        config.get("minimum_normalized_distance", 1.0e-4),
+    )
+    result = float(value)
+    if not np.isfinite(result) or result < 0:
+        raise ValueError("minimum_normalized_distance must be finite and non-negative.")
+    return result

@@ -9,7 +9,8 @@ from scipy.stats import qmc
 from krispu.domains import CandidateDomain
 
 METHODS = (
-    "krispu_loo",
+    "raw_loo_sensitivity",
+    "support_adjusted_krispu",
     "posterior_std",
     "random",
     "lhs",
@@ -54,7 +55,7 @@ def maximin_index(
     observed_X: NDArray[np.float64],
     domain: CandidateDomain,
     available: NDArray[np.bool_],
-    minimum_normalized_distance: float = 0.05,
+    minimum_normalized_distance: float = 1.0e-4,
 ) -> int:
     from krispu.candidates import valid_candidate_mask
 

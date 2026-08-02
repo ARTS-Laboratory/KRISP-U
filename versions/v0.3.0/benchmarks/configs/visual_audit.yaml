@@ -4,9 +4,11 @@ fields:
   - smooth
   - localized
   - anisotropic
-  - noisy_baseline
+  - rough_correlated
+  - rough_multiscale
 methods:
-  - krispu_loo
+  - raw_loo_sensitivity
+  - support_adjusted_krispu
   - posterior_std
   - random
   - lhs
@@ -14,7 +16,8 @@ methods:
 initial_design: interior_maximin
 initial_sample_count: 5
 initial_boundary_margin: 0.05
-minimum_normalized_distance: 0.05
+candidate_validity:
+  minimum_normalized_distance: 1.0e-4
 final_budget: 25
 candidate_count: 1024
 evaluation_grid_size: 80

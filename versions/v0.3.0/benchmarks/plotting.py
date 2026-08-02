@@ -18,25 +18,26 @@ def plot_field_audit(state: Any, path: Path, save_pdf: bool = False) -> None:
     true = state.true_field.reshape(shape)
     predicted = state.predicted_field.reshape(shape)
     error = state.metrics.absolute_error.reshape(shape)
-    fields = [true, predicted, error, state.posterior_std.reshape(shape)]
+    if state.krispu_uncertainty is None:
+        raise ValueError("The field audit requires KRISP-U uncertainty.")
+    fields = [true, predicted, state.krispu_uncertainty.reshape(shape), error]
     labels = [
         "True field",
         "Reconstructed field",
+        "KRISP-U uncertainty",
         "Absolute reconstruction error",
-        "GP posterior std",
     ]
-    if state.loo_field_uncertainty is None:
-        raise ValueError("The field audit requires LOO field uncertainty.")
-    fields.append(state.loo_field_uncertainty.reshape(shape))
-    labels.append("LOO field uncertainty")
-    figure, axes = plt.subplots(2, 3, figsize=(13, 8), constrained_layout=True)
+    figure, axes = plt.subplots(2, 2, figsize=(10, 8), constrained_layout=True)
     related_limits = (float(np.min(true)), float(np.max(true)))
     error_limit = max(float(np.max(error)), np.finfo(float).eps)
     axes = np.asarray(axes).reshape(-1)
-    for axis, values, label in zip(axes[:5], fields, labels, strict=True):
-        limits = (
-            related_limits if label.startswith(("True", "Reconstructed")) else (0.0, error_limit)
-        )
+    for axis, values, label in zip(axes.flat, fields, labels, strict=True):
+        if label.startswith(("True", "Reconstructed")):
+            limits = related_limits
+        elif label == "KRISP-U uncertainty":
+            limits = (0.0, max(float(np.max(values)), np.finfo(float).eps))
+        else:
+            limits = (0.0, error_limit)
         image = axis.pcolormesh(
             x, y, values, shading="auto", cmap="viridis", vmin=limits[0], vmax=limits[1]
         )
@@ -54,51 +55,24 @@ def plot_field_audit(state: Any, path: Path, save_pdf: bool = False) -> None:
         axis.set_xlabel("x")
         axis.set_ylabel("y")
         figure.colorbar(image, ax=axis, shrink=0.82)
-    axis = axes.flat[5]
-    axis.contourf(x, y, true, levels=16, cmap="Greys", alpha=0.55)
-    initial_count = state.initial_sample_count
-    axis.scatter(
-        state.observed_X[:initial_count, 0],
-        state.observed_X[:initial_count, 1],
-        c="white",
-        edgecolors="black",
-        s=30,
-        label="initial",
-    )
-    if len(state.observed_X) > initial_count:
-        adaptive = state.observed_X[initial_count:]
-        axis.scatter(
-            adaptive[:, 0],
-            adaptive[:, 1],
-            c=np.arange(len(adaptive)),
-            cmap="plasma",
-            s=30,
-            label="adaptive order",
-        )
-        for order, point in enumerate(adaptive, start=1):
-            axis.text(point[0], point[1], str(order), fontsize=7)
-    if state.recommended_point is not None:
-        axis.scatter(*state.recommended_point, marker="*", s=90, c="red", edgecolors="black")
-    axis.set(xlim=(-1, 1), ylim=(-1, 1), aspect="equal", title="Sample locations and order")
-    axis.legend(fontsize=7, loc="best")
     figure.suptitle(f"{state.field} | {state.method} | n={state.sample_count}")
     _save(figure, path, save_pdf)
 
 
 def plot_uncertainty_components(state: Any, path: Path, save_pdf: bool = False) -> None:
-    if state.loo_field_uncertainty is None:
+    if state.loo_field_sensitivity is None:
         return
     x, y, shape = _grid(state.evaluation_points)
     values = [
-        state.posterior_std,
-        state.loo_field_uncertainty,
-        state.calibrated_posterior_std,
+        state.loo_field_sensitivity,
+        state.kernel_support_deficit,
+        state.krispu_uncertainty,
         state.metrics.absolute_error,
     ]
     labels = [
-        "posterior_std",
-        "loo_field_uncertainty",
-        "calibrated_posterior_std",
+        "LOO field sensitivity",
+        "Kernel support deficit",
+        "KRISP-U uncertainty",
         "absolute error",
     ]
     figure, axes = plt.subplots(1, 4, figsize=(15, 4), constrained_layout=True)
@@ -112,6 +86,14 @@ def plot_uncertainty_components(state: Any, path: Path, save_pdf: bool = False) 
             edgecolors="black",
             linewidths=0.4,
         )
+        if state.recommended_point is not None:
+            axis.scatter(
+                *state.recommended_point,
+                marker="*",
+                s=90,
+                c="red",
+                edgecolors="black",
+            )
         axis.set(xlim=(-1, 1), ylim=(-1, 1), aspect="equal", title=label)
         figure.colorbar(image, ax=axis, shrink=0.82)
     figure.suptitle(f"Uncertainty components | {state.field} | n={state.sample_count}")
@@ -196,10 +178,11 @@ def plot_sampling_paths(
 def plot_uncertainty_error(state: Any, path: Path, save_pdf: bool = False) -> None:
     pairs = [
         ("posterior_std", state.posterior_std),
-        ("loo_field_uncertainty", state.loo_field_uncertainty),
-        ("calibrated_posterior_std", state.calibrated_posterior_std),
+        ("loo_field_sensitivity", state.loo_field_sensitivity),
+        ("kernel_support_deficit", state.kernel_support_deficit),
+        ("krispu_uncertainty", state.krispu_uncertainty),
     ]
-    figure, axes = plt.subplots(1, 3, figsize=(12, 4), constrained_layout=True)
+    figure, axes = plt.subplots(1, 4, figsize=(15, 4), constrained_layout=True)
     for axis, (label, uncertainty) in zip(axes.flat, pairs, strict=True):
         if uncertainty is None:
             axis.axis("off")
@@ -217,7 +200,8 @@ def plot_uncertainty_error(state: Any, path: Path, save_pdf: bool = False) -> No
 
 def plot_error_concentration(state: Any, path: Path, save_pdf: bool = False) -> None:
     candidates = [
-        ("loo_field_uncertainty", state.loo_field_uncertainty),
+        ("loo_field_sensitivity", state.loo_field_sensitivity),
+        ("krispu_uncertainty", state.krispu_uncertainty),
         ("posterior_std", state.posterior_std),
     ]
     figure, axis = plt.subplots(figsize=(7, 5), constrained_layout=True)
@@ -247,12 +231,13 @@ def plot_error_concentration(state: Any, path: Path, save_pdf: bool = False) -> 
 def plot_component_evolution(
     records: list[dict[str, Any]], path: Path, save_pdf: bool = False
 ) -> None:
-    rows = [row for row in records if row["method"] == "krispu_loo"]
+    rows = [row for row in records if row["method"] == "support_adjusted_krispu"]
     figure, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
     for key in (
         "mean_posterior_std",
-        "mean_loo_field_uncertainty",
-        "mean_calibrated_posterior_std",
+        "mean_loo_field_sensitivity",
+        "mean_kernel_support_deficit",
+        "mean_krispu_uncertainty",
     ):
         values = [
             (int(row["sample_count"]), float(row[key]))
@@ -282,7 +267,7 @@ def plot_boundary_diagnostics(
     boundary = np.asarray([bool(row["near_domain_boundary"]) for row in adaptive], dtype=float)
     hull = np.asarray([bool(row["on_current_sample_hull"]) for row in adaptive], dtype=float)
     distances = np.asarray(
-        [float(row["distance_to_nearest_observation"]) for row in adaptive], dtype=float
+        [float(row["nearest_normalized_distance"]) for row in adaptive], dtype=float
     )
     figure, axes = plt.subplots(1, 3, figsize=(13, 4), constrained_layout=True)
     if len(counts):
@@ -311,7 +296,7 @@ def plot_dominant_loo_diagnostics(states: list[Any], path: Path, save_pdf: bool 
     axes = np.asarray(axes).reshape(-1)
     for axis, state in zip(axes, selected, strict=True):
         x, y, shape = _grid(state.evaluation_points)
-        values = state.loo_field_uncertainty.reshape(shape)
+        values = state.loo_field_sensitivity.reshape(shape)
         image = axis.pcolormesh(x, y, values, shading="auto", cmap="magma")
         eligible = state.observed_loo_eligible
         axis.scatter(
@@ -344,7 +329,7 @@ def plot_dominant_loo_diagnostics(states: list[Any], path: Path, save_pdf: bool 
         title = f"n={state.sample_count}; dominant fold={dominant}"
         axis.set(xlim=(-1, 1), ylim=(-1, 1), aspect="equal", title=title)
         axis.legend(fontsize=7, loc="best")
-        figure.colorbar(image, ax=axis, shrink=0.8, label="LOO field uncertainty")
+        figure.colorbar(image, ax=axis, shrink=0.8, label="LOO field sensitivity")
     figure.suptitle(f"Dominant LOO fold diagnostics | {selected[0].field}")
     _save(figure, path, save_pdf)
 

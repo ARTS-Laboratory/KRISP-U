@@ -256,8 +256,8 @@ def plot_method_comparisons(
 
 
 def _uncertainty(state: Any) -> tuple[np.ndarray, str]:
-    if state.method == "krispu_loo" and state.loo_field_uncertainty is not None:
-        return state.loo_field_uncertainty, "LOO field uncertainty"
+    if state.krispu_uncertainty is not None:
+        return state.krispu_uncertainty, "KRISP-U uncertainty"
     if state.posterior_std is not None:
         return state.posterior_std, "GP posterior std"
     raise ValueError("A fitted-surrogate uncertainty field is required for visualization.")

@@ -7,8 +7,9 @@ from collections.abc import Callable, Iterable
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from krispu.acquisition.loo_uncertainty import loo_uncertainty_scores
+from krispu.acquisition.krispu_uncertainty import krispu_uncertainty_scores
 from krispu.acquisition.posterior_std import posterior_std_scores
+from krispu.acquisition.raw_loo_sensitivity import raw_loo_sensitivity_scores
 from krispu.candidates import generate_candidates, nearest_normalized_distance, valid_candidate_mask
 from krispu.config import GPRConfig
 from krispu.domains import CandidateDomain
@@ -16,39 +17,48 @@ from krispu.observations import ObservationSet
 from krispu.results import Recommendation, RecommendationResult, UncertaintyDiagnostics
 from krispu.surrogates.gpr import GPRSurrogate
 from krispu.uncertainty.jackknife import (
-    combine_uncertainties,
-    jackknife_std,
     loo_calibration_factor,
+    loo_field_sensitivity,
 )
 from krispu.uncertainty.loo_bruteforce import compute_bruteforce_loo
+from krispu.uncertainty.support import kernel_support_deficit
 
 
 class KrispURecommender:
     """Recommend measurements where the reconstructed field is most uncertain.
 
-    The default score is candidate-level LOO field uncertainty. It is not an
+    The default score is support-adjusted KRISP-U uncertainty. It is not an
     objective optimizer and has no expected-improvement path.
     """
 
     def __init__(
         self,
         domain: CandidateDomain,
-        uncertainty: str = "krispu_loo",
+        uncertainty: str = "support_adjusted_krispu",
         gpr_config: GPRConfig | None = None,
         random_state: int | np.random.Generator | None = None,
         n_candidates: int = 2048,
         candidate_method: str = "lhs",
-        min_normalized_distance: float = 0.05,
+        min_normalized_distance: float = 1.0e-4,
         excluded_regions: (
             Iterable[Callable[[NDArray[np.float64]], NDArray[np.bool_]]]
             | Callable[[NDArray[np.float64]], NDArray[np.bool_]]
             | None
         ) = None,
     ) -> None:
-        if uncertainty == "loo_uncertainty":
-            uncertainty = "krispu_loo"
-        if uncertainty not in {"krispu_loo", "posterior_std"}:
-            raise ValueError("uncertainty must be 'krispu_loo' or explicit 'posterior_std'.")
+        uncertainty = {
+            "loo_uncertainty": "support_adjusted_krispu",
+            "krispu_loo": "support_adjusted_krispu",
+        }.get(uncertainty, uncertainty)
+        if uncertainty not in {
+            "support_adjusted_krispu",
+            "raw_loo_sensitivity",
+            "posterior_std",
+        }:
+            raise ValueError(
+                "uncertainty must be 'support_adjusted_krispu', "
+                "'raw_loo_sensitivity', or 'posterior_std'."
+            )
         if n_candidates <= 0:
             raise ValueError("n_candidates must be positive.")
         if min_normalized_distance < 0:
@@ -88,7 +98,14 @@ class KrispURecommender:
             X_normalized=X_normalized,
             epsilon=self.gpr_config.response_epsilon,
         )
-        loo_mean, loo_field_uncertainty = jackknife_std(loo.field_means)
+        loo_mean, sensitivity = loo_field_sensitivity(loo.field_means)
+        support_deficit, maximum_kernel_correlation = kernel_support_deficit(
+            surrogate,
+            X_normalized,
+            reference_normalized,
+            epsilon=self.gpr_config.response_epsilon,
+        )
+        krispu_uncertainty = sensitivity * np.sqrt(support_deficit)
         dominant_columns = np.argmax(
             (loo.field_means - loo_mean[:, None]) ** 2,
             axis=1,
@@ -96,14 +113,16 @@ class KrispURecommender:
         dominant_indices = loo.loo_eligible_indices[dominant_columns]
         dominant_coordinates = observations.X[dominant_indices].copy()
         calibration = loo_calibration_factor(loo.standardized_residuals)
-        calibrated, combined = combine_uncertainties(
-            loo_field_uncertainty, posterior_std, calibration
-        )
+        calibrated = calibration * np.maximum(posterior_std, 0.0)
+        combined = krispu_uncertainty.copy()
         if not np.all(np.isfinite(predicted_mean)):
             raise FloatingPointError("predicted means are non-finite.")
         for name, value in (
             ("posterior standard deviations", posterior_std),
-            ("LOO field uncertainties", loo_field_uncertainty),
+            ("LOO field sensitivities", sensitivity),
+            ("kernel support deficits", support_deficit),
+            ("KRISP-U uncertainties", krispu_uncertainty),
+            ("maximum kernel correlations", maximum_kernel_correlation),
             ("calibrated posterior uncertainties", calibrated),
             ("combined uncertainties", combined),
         ):
@@ -118,7 +137,10 @@ class KrispURecommender:
             predicted_mean=predicted_mean,
             posterior_std=posterior_std,
             loo_mean=loo_mean,
-            loo_field_uncertainty=loo_field_uncertainty,
+            loo_field_sensitivity=sensitivity,
+            kernel_support_deficit=support_deficit,
+            krispu_uncertainty=krispu_uncertainty,
+            maximum_kernel_correlation_to_observations=maximum_kernel_correlation,
             loo_calibration_factor=calibration,
             calibrated_posterior_std=calibrated,
             combined_std=combined,
@@ -174,9 +196,13 @@ class KrispURecommender:
         )
         diagnostics = self.evaluate_uncertainty(observations, references)
         scores = (
-            loo_uncertainty_scores(diagnostics)
-            if self.uncertainty == "krispu_loo"
-            else posterior_std_scores(diagnostics)
+            krispu_uncertainty_scores(diagnostics)
+            if self.uncertainty == "support_adjusted_krispu"
+            else (
+                raw_loo_sensitivity_scores(diagnostics)
+                if self.uncertainty == "raw_loo_sensitivity"
+                else posterior_std_scores(diagnostics)
+            )
         )
         # Scores must correspond to candidate rows. This explicit check avoids
         # silently ranking a differently ordered reference field.
@@ -196,10 +222,13 @@ class KrispURecommender:
                 acquisition_score=float(scores[index]),
                 predicted_mean=float(diagnostics.predicted_mean[index]),
                 posterior_std=float(diagnostics.posterior_std[index]),
-                loo_field_uncertainty=float(diagnostics.loo_field_uncertainty[index]),
-                calibrated_posterior_std=float(diagnostics.calibrated_posterior_std[index]),
-                combined_std=float(diagnostics.combined_std[index]),
-                distance_to_nearest_observation=float(distances[index]),
+                loo_field_sensitivity=float(diagnostics.loo_field_sensitivity[index]),
+                kernel_support_deficit=float(diagnostics.kernel_support_deficit[index]),
+                krispu_uncertainty=float(diagnostics.krispu_uncertainty[index]),
+                nearest_normalized_distance=float(distances[index]),
+                maximum_kernel_correlation_to_observations=float(
+                    diagnostics.maximum_kernel_correlation_to_observations[index]
+                ),
             )
             for rank, index in enumerate(order, start=1)
         ]

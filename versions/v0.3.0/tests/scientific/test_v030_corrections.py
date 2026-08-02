@@ -23,19 +23,19 @@ def _problem() -> tuple[ContinuousDomain, ObservationSet, np.ndarray]:
     return domain, ObservationSet(X, y), candidates
 
 
-def test_canonical_score_is_exactly_loo_field_uncertainty() -> None:
+def test_canonical_score_is_exactly_krispu_uncertainty() -> None:
     domain, observations, candidates = _problem()
     result = KrispURecommender(domain).recommend(observations, candidates=candidates)
     assert np.array_equal(
-        loo_uncertainty_scores(result.diagnostics), result.diagnostics.loo_field_uncertainty
+        loo_uncertainty_scores(result.diagnostics), result.diagnostics.krispu_uncertainty
     )
     assert (
         result.recommendations[0].acquisition_score
-        == result.diagnostics.loo_field_uncertainty.max()
+        == result.diagnostics.krispu_uncertainty.max()
     )
 
 
-def test_posterior_std_and_combined_std_cannot_change_loo_ranking() -> None:
+def test_posterior_std_and_legacy_combined_std_cannot_change_krispu_ranking() -> None:
     domain, observations, candidates = _problem()
     recommender = KrispURecommender(domain)
     original = recommender.evaluate_uncertainty(observations, candidates)
@@ -46,9 +46,9 @@ def test_posterior_std_and_combined_std_cannot_change_loo_ranking() -> None:
     )
     recommender.evaluate_uncertainty = lambda *_args: altered  # type: ignore[method-assign]
     result = recommender.recommend(observations, candidates=candidates)
-    expected = int(np.argmax(original.loo_field_uncertainty))
+    expected = int(np.argmax(original.krispu_uncertainty))
     assert np.allclose(result.as_array()[0], candidates[expected])
-    assert result.recommendations[0].acquisition_score == original.loo_field_uncertainty[expected]
+    assert result.recommendations[0].acquisition_score == original.krispu_uncertainty[expected]
 
 
 def test_best_available_uses_observations_and_minimum_distance() -> None:
@@ -146,5 +146,12 @@ def test_benchmark_config_and_field_plot_use_no_combined_panel() -> None:
         config = yaml.safe_load(Path("benchmarks/configs", name).read_text(encoding="utf-8"))
         assert "krispu_combined" not in config["methods"]
         assert "krispu_jackknife" not in config["methods"]
-        assert config["methods"] == ["krispu_loo", "posterior_std", "random", "lhs", "maximin"]
+        assert config["methods"] == [
+            "raw_loo_sensitivity",
+            "support_adjusted_krispu",
+            "posterior_std",
+            "random",
+            "lhs",
+            "maximin",
+        ]
     assert "combined" not in inspect.getsource(plot_field_audit).lower()

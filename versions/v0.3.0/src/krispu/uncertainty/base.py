@@ -13,7 +13,7 @@ class UncertaintyComponents:
     """The separate terms that form the canonical KRISP-U field."""
 
     loo_mean: NDArray[np.float64]
-    loo_field_uncertainty: NDArray[np.float64]
-    loo_calibration_factor: float
-    calibrated_posterior_std: NDArray[np.float64]
-    combined_std: NDArray[np.float64]
+    loo_field_sensitivity: NDArray[np.float64]
+    kernel_support_deficit: NDArray[np.float64]
+    krispu_uncertainty: NDArray[np.float64]
+    posterior_std: NDArray[np.float64]

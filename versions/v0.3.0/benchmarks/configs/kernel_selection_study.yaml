@@ -10,7 +10,8 @@ fields:
   - trend_plus_local
 initial_sample_count: 5
 initial_boundary_margin: 0.05
-minimum_normalized_distance: 0.05
+candidate_validity:
+  minimum_normalized_distance: 1.0e-4
 final_budget: 12
 candidate_count: 96
 evaluation_grid_size: 25

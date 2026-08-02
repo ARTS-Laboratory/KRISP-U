@@ -29,5 +29,7 @@ The brute-force implementation stores the complete matrix
 `F_LOO.shape == (n_reference, n_loo)`. It never attaches one scalar to each
 removed point or interpolates those scalars into an acquisition field.
 
-The default recommendation is the valid candidate maximizing the combined
-uncertainty described in `uncertainty.md`.
+The default recommendation is the valid candidate maximizing KRISP-U
+uncertainty. Candidate distance is only a small duplicate/near-duplicate
+validity floor (`1e-4` in normalized coordinates); it is not an acquisition
+score.

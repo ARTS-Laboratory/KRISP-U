@@ -48,6 +48,25 @@ def generate_report(output: Path) -> Path:
             f"- `{field}`: " + ", ".join(f"{method} ({value:.4g})" for value, method in ranking)
         )
 
+    if summaries:
+        lines.extend(
+            (
+                "",
+                "## Required selection diagnostics",
+                "",
+                "| Field | Method | Trial | Final NRMSE | NRMSE AUC | Median nearest distance | Fraction within 0.05 | Fraction correlation > 0.95 |",
+                "|---|---|---:|---:|---:|---:|---:|---:|",
+            )
+        )
+        for row in summaries:
+            lines.append(
+                f"| {row['field']} | {row['method']} | {row['trial']} | "
+                f"{float(row['final_nrmse']):.6g} | {float(row['nrmse_auc']):.6g} | "
+                f"{_optional_float(row.get('median_nearest_observation_distance'))} | "
+                f"{_optional_float(row.get('fraction_selections_within_0_05_normalized_distance'))} | "
+                f"{_optional_float(row.get('fraction_selections_kernel_correlation_above_0_95'))} |"
+            )
+
     noisy = [row for row in summaries if row["field"] == "noisy_baseline"]
     if noisy:
         lines.extend(("", "## Noisy-baseline field", ""))
@@ -60,11 +79,14 @@ def generate_report(output: Path) -> Path:
                 f"| {method} | {_mean(method_rows, 'final_nrmse'):.6g} | "
                 f"{_mean(method_rows, 'nrmse_auc'):.6g} | {_mean(method_rows, 'final_r2'):.6g} |"
             )
-        krispu = _mean([row for row in noisy if row["method"] == "krispu_loo"], "final_nrmse")
+        krispu = _mean(
+            [row for row in noisy if row["method"] == "support_adjusted_krispu"],
+            "final_nrmse",
+        )
         baseline_values = [
             _mean([row for row in noisy if row["method"] == method], "final_nrmse")
             for method in methods
-            if method != "krispu_loo"
+            if method != "support_adjusted_krispu"
         ]
         if baseline_values:
             best_baseline = min(baseline_values)
@@ -87,6 +109,12 @@ def generate_report(output: Path) -> Path:
 
 def _mean(rows: list[dict[str, Any]], key: str) -> float:
     return float(np.mean([float(row[key]) for row in rows]))
+
+
+def _optional_float(value: Any) -> str:
+    if value in (None, ""):
+        return "n/a"
+    return f"{float(value):.6g}"
 
 
 def _file_summary(directory: Path) -> str:

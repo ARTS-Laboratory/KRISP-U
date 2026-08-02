@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--n-recommendations", type=int, default=1)
     parser.add_argument("--n-candidates", type=int, default=2048)
-    parser.add_argument("--min-normalized-distance", type=float, default=0.05)
+    parser.add_argument("--min-normalized-distance", type=float, default=1.0e-4)
     parser.add_argument("--random-state", type=int, default=0)
     parser.add_argument("--output", required=True)
     args = parser.parse_args(argv)
@@ -52,11 +52,13 @@ def main(argv: list[str] | None = None) -> int:
         fieldnames = [
             "rank",
             *args.features,
-            "loo_field_uncertainty",
-            "calibrated_posterior_std",
+            "loo_field_sensitivity_at_selection",
+            "kernel_support_deficit_at_selection",
+            "krispu_uncertainty_at_selection",
             "predicted_mean",
             "posterior_std",
-            "distance_to_nearest_observation",
+            "nearest_normalized_distance",
+            "maximum_kernel_correlation_to_observations",
             "acquisition_score",
         ]
         writer = csv.DictWriter(handle, fieldnames=fieldnames)

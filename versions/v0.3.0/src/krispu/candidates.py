@@ -16,6 +16,8 @@ from krispu.domains import (
     PolygonDomain,
 )
 
+DEFAULT_MINIMUM_NORMALIZED_DISTANCE = 1.0e-4
+
 
 def _rng(random_state: int | np.random.Generator | None) -> np.random.Generator:
     return (
@@ -105,7 +107,7 @@ def valid_candidate_mask(
     domain: CandidateDomain,
     candidates: ArrayLike,
     observed: ArrayLike,
-    minimum_normalized_distance: float = 0.0,
+    minimum_normalized_distance: float = DEFAULT_MINIMUM_NORMALIZED_DISTANCE,
     excluded_regions: (
         Iterable[Callable[[NDArray[np.float64]], NDArray[np.bool_]]]
         | Callable[[NDArray[np.float64]], NDArray[np.bool_]]
@@ -126,7 +128,12 @@ def valid_candidate_mask(
     if len(observed_values) == 0:
         raise ValueError("observed must contain at least one point.")
     exact_observed = np.any(
-        np.all(np.isclose(values[:, None, :], observed_values[None, :, :], atol=1e-10), axis=2),
+        np.all(
+            np.isclose(
+                values[:, None, :], observed_values[None, :, :], atol=1e-10, rtol=0.0
+            ),
+            axis=2,
+        ),
         axis=1,
     )
     mask &= ~exact_observed
