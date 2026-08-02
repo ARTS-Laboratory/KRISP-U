@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
+import shutil
+import stat
 import subprocess
 from dataclasses import asdict
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,7 @@ from benchmarks.plotting import (
     plot_uncertainty_error,
 )
 from benchmarks.records import RECORD_FIELDS, save_spatial_state, write_records
+from benchmarks.visualization import plot_method_comparisons, save_sequential_visuals
 from krispu import GPRConfig
 from krispu.candidates import generate_candidates
 from krispu.domains import CandidateDomain, ContinuousDomain
@@ -45,9 +48,16 @@ def main() -> None:
 
 def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs")) -> Path:
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if config.get("study") == "kernel_selection":
+        from benchmarks.kernel_study import run_kernel_selection_study
+
+        return run_kernel_selection_study(config_path, output_root)
+    if not config.get("include_noisy_field", True):
+        config["fields"] = [
+            field for field in config["fields"] if field not in {"noisy", "noisy_baseline"}
+        ]
     _validate_config(config)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    output = output_root / f"{timestamp}_{config['experiment_name']}"
+    output = _prepare_benchmark_output(output_root, config["experiment_name"])
     figure_dirs = {
         name: output / "figures" / name
         for name in (
@@ -63,6 +73,14 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
         )
     }
     for directory in figure_dirs.values():
+        directory.mkdir(parents=True, exist_ok=True)
+    for directory in (
+        output / "animations",
+        output / "snapshots",
+        output / "point_progress",
+        output / "comparisons",
+        output / "reports",
+    ):
         directory.mkdir(parents=True, exist_ok=True)
     (output / "spatial_arrays").mkdir(parents=True, exist_ok=True)
     (output / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
@@ -134,9 +152,27 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
                     component_records.append(record)
                     array_name = f"{field_name}_trial{trial}_{method}_n{state.sample_count}.npz"
                     save_spatial_state(output / "spatial_arrays" / array_name, state)
+                if config.get("save_gifs", False) or config.get("save_png_snapshots", False):
+                    save_sequential_visuals(
+                        states,
+                        output,
+                        save_gif=bool(config.get("save_gifs", False)),
+                        save_snapshots=bool(config.get("save_png_snapshots", False)),
+                        snapshot_every=config.get("snapshot_every"),
+                        snapshot_sample_counts=config.get("snapshot_sample_counts"),
+                        frame_duration_ms=int(config.get("frame_duration_ms", 500)),
+                        dpi=int(config.get("dpi", 150)),
+                        annotate_point_order=bool(config.get("annotate_point_order", True)),
+                        save_point_layout_gif=bool(
+                            config.get("save_point_layout_animations", False)
+                        ),
+                        save_snapshot_gif=bool(config.get("save_snapshot_gifs", True)),
+                    )
                 if method == "krispu_loo" and trial == 0:
                     diagnostic_states.setdefault(field_name, []).extend(states)
-                    snapshot_counts = {int(value) for value in config["snapshot_sample_counts"]}
+                    snapshot_counts = {
+                        int(value) for value in config.get("snapshot_sample_counts", [])
+                    }
                     for state in states:
                         if state.sample_count in snapshot_counts:
                             plot_field_audit(
@@ -199,6 +235,13 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
             bool(config.get("save_pdf", False)),
         )
     plot_learning_curves(all_records, figure_dirs["learning_curves"], int(config["trials"]) > 1)
+    if config.get("save_comparison_figures", True):
+        plot_method_comparisons(
+            all_records,
+            output / "comparisons",
+            uncertainty_bands=int(config["trials"]) > 1,
+            dpi=int(config.get("dpi", 150)),
+        )
     plot_paired_differences(
         paired_rows, figure_dirs["paired_performance"], bool(config.get("save_pdf", False))
     )
@@ -226,7 +269,32 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
         print(json.dumps(row, sort_keys=True))
     manifest = _manifest(config, config_path, seeds)
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    from benchmarks.generate_report import generate_report
+
+    generate_report(output)
     return output
+
+
+def _prepare_benchmark_output(output_root: Path, experiment_name: str) -> Path:
+    """Replace the dedicated output root with the current benchmark run."""
+    output_root = output_root.resolve()
+    if output_root == Path.cwd().resolve() or output_root.parent == output_root:
+        raise ValueError("output_root must be a dedicated directory")
+    output_root.mkdir(parents=True, exist_ok=True)
+    for child in output_root.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child, onerror=_remove_readonly)
+        else:
+            child.unlink()
+    output = output_root / experiment_name
+    output.mkdir(parents=True, exist_ok=True)
+    return output
+
+
+def _remove_readonly(function: Any, path: str, _exc_info: Any) -> None:
+    """Retry generated-file cleanup after clearing a Windows read-only bit."""
+    os.chmod(path, stat.S_IWRITE)
+    function(path)
 
 
 def _validate_config(config: dict[str, Any]) -> None:
@@ -265,6 +333,12 @@ def _validate_config(config: dict[str, Any]) -> None:
         raise ValueError("minimum_normalized_distance must be non-negative.")
     if int(config["final_budget"]) < int(config["initial_sample_count"]):
         raise ValueError("final_budget must be at least initial_sample_count.")
+    if config.get("snapshot_every") is not None and int(config["snapshot_every"]) <= 0:
+        raise ValueError("snapshot_every must be positive when provided.")
+    if int(config.get("frame_duration_ms", 500)) <= 0:
+        raise ValueError("frame_duration_ms must be positive.")
+    if int(config.get("dpi", 150)) <= 0:
+        raise ValueError("dpi must be positive.")
 
 
 def _initial_design(

@@ -73,7 +73,9 @@ class GPRSurrogate:
         standardizer = ResponseStandardizer.fit(values, self.config.response_epsilon)
         variances = self._validate_noise(observation_variances, len(values), standardizer.scale)
         model = self._make_model(
-            self._initial_kernel(points.shape[1]), optimize=True, alpha=self._alpha(variances)
+            self._initial_kernel(points.shape[1]),
+            optimize=self.config.optimize_hyperparameters,
+            alpha=self._alpha(variances),
         )
         model.fit(points, standardizer.transform(values))
         self.model_ = model
@@ -83,6 +85,17 @@ class GPRSurrogate:
         self.observation_variances_ = None if variances is None else variances.copy()
         self.kernel_ = clone(model.kernel_)
         return self
+
+    @property
+    def log_marginal_likelihood(self) -> float:
+        """Return the fitted log marginal likelihood."""
+
+        if self.model_ is None:
+            raise ValueError("Call fit() before accessing the log marginal likelihood.")
+        value = float(self.model_.log_marginal_likelihood_value_)
+        if not np.isfinite(value):
+            raise FloatingPointError("The fitted log marginal likelihood is non-finite.")
+        return value
 
     def fit_fixed_kernel(
         self,
@@ -145,6 +158,8 @@ class GPRSurrogate:
         return clone(self.kernel_)
 
     def _initial_kernel(self, dimension: int) -> Any:
+        if self.config.kernel is not None:
+            return clone(self.config.kernel)
         length_scale = np.full(dimension, self.config.length_scale_initial, dtype=float)
         length_bounds = self.config.length_scale_bounds
         base = Matern(length_scale=length_scale, length_scale_bounds=length_bounds, nu=1.5)

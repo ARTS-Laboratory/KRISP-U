@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.4", "black>=24"]
-plot = ["matplotlib>=3.7"]
+plot = ["matplotlib>=3.7", "Pillow>=9"]
 
 [project.scripts]
 krispu-recommend = "krispu.cli:main"

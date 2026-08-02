@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import Any
 
@@ -14,6 +14,8 @@ from scipy.spatial import ConvexHull, QhullError
 from krispu.candidates import nearest_normalized_distance, valid_candidate_mask
 from krispu.config import GPRConfig
 from krispu.domains import CandidateDomain
+from krispu.kernels.selection import KernelSelectionResult, KernelSelector
+from krispu.kernels.specification import KernelSelectionConfig, parse_kernel_configuration
 from krispu.observations import ObservationSet
 from krispu.recommender import KrispURecommender
 from krispu.surrogates.gpr import GPRSurrogate
@@ -51,6 +53,12 @@ class SequentialState:
     dominant_observation_is_anchor: bool | None
     dominant_observation_near_boundary: bool | None
     wall_time_seconds: float
+    selection_mode: str = "fixed_generic"
+    profile: str | None = None
+    selected_kernel_id: str = "matern_32_ard"
+    current_length_scales: tuple[float, ...] = ()
+    selection_score: float | None = None
+    kernel_selection_result: KernelSelectionResult | None = None
 
     @property
     def jackknife_std(self) -> NDArray[np.float64] | None:
@@ -108,6 +116,11 @@ class SequentialState:
             "dominant_observation_is_anchor": self.dominant_observation_is_anchor,
             "dominant_observation_near_boundary": self.dominant_observation_near_boundary,
             "wall_time_seconds": self.wall_time_seconds,
+            "selection_mode": self.selection_mode,
+            "profile": self.profile,
+            "selected_kernel_id": self.selected_kernel_id,
+            "current_length_scales": ";".join(str(value) for value in self.current_length_scales),
+            "selection_score": self.selection_score,
         }
 
 
@@ -129,6 +142,9 @@ def run_sequential_design(
     initial_loo_eligible: ArrayLike | None = None,
     minimum_normalized_distance: float = 0.05,
     boundary_margin: float = 0.05,
+    kernel_selection_config: KernelSelectionConfig | dict[str, Any] | None = None,
+    kernel_schedule: dict[int, str | tuple[str, Any]] | None = None,
+    selection_mode_label: str | None = None,
 ) -> list[SequentialState]:
     """Run one paired-trial method with one fixed candidate pool."""
 
@@ -171,6 +187,16 @@ def run_sequential_design(
     if len(observed_y) != len(observed_X):
         raise ValueError("hidden_field must return one value per point.")
     config = gpr_config or GPRConfig(random_state=random_state)
+    selection_config = (
+        None
+        if kernel_selection_config is None
+        else parse_kernel_configuration(kernel_selection_config)
+    )
+    selector = (
+        None
+        if selection_config is None and kernel_schedule is None
+        else KernelSelector(selection_config or KernelSelectionConfig(), gpr_config=config)
+    )
     available = valid_candidate_mask(
         domain,
         pool,
@@ -187,11 +213,56 @@ def run_sequential_design(
         reference = np.vstack((evaluation, pool))
         n_evaluation = len(evaluation)
         diagnostics = None
+        fitted_kernel_for_state: Any | None = None
+        selection_result: KernelSelectionResult | None = None
+        step_config = config
+        if kernel_schedule is not None:
+            scheduled = kernel_schedule.get(len(observed_X))
+            if scheduled is None:
+                raise ValueError(
+                    f"kernel_schedule is missing a kernel for sample_count={len(observed_X)}."
+                )
+            if isinstance(scheduled, tuple):
+                scheduled_id, scheduled_kernel = scheduled
+                selection_result = KernelSelectionResult(
+                    sample_count=len(observed_X),
+                    selection_mode="scheduled",
+                    profile=None,
+                    selected_kernel_id=scheduled_id,
+                    previous_kernel_id=None,
+                    selection_score=0.0,
+                    candidate_scores=(),
+                    fitted_kernel=scheduled_kernel,
+                    optimized_hyperparameters={},
+                    optimizer_restarts=0,
+                    selection_runtime=0.0,
+                    switch_accepted=True,
+                    switch_rejection_reason=None,
+                    selection_evaluated=False,
+                )
+            else:
+                assert selector is not None
+                selection_result = selector.fit_kernel_by_id(
+                    scheduled,
+                    domain.normalize(observed_X),
+                    observed_y,
+                    gpr_config=config,
+                )
+        elif selector is not None:
+            selection_result = selector.select(
+                domain.normalize(observed_X), observed_y, gpr_config=config
+            )
+        if selection_result is not None:
+            step_config = replace(
+                config,
+                kernel=selection_result.fitted_kernel,
+                optimize_hyperparameters=False,
+            )
         if method == "krispu_loo":
             recommender = KrispURecommender(
                 domain,
                 uncertainty="krispu_loo",
-                gpr_config=config,
+                gpr_config=step_config,
                 random_state=random_state,
                 n_candidates=len(pool),
                 min_normalized_distance=minimum_normalized_distance,
@@ -199,9 +270,11 @@ def run_sequential_design(
             diagnostics = recommender.evaluate_uncertainty(observations, reference)
             predicted = diagnostics.predicted_mean
             posterior = diagnostics.posterior_std
+            fitted_kernel_for_state = recommender.surrogate_.frozen_kernel
         else:
-            surrogate = GPRSurrogate(config).fit(domain.normalize(observed_X), observed_y)
+            surrogate = GPRSurrogate(step_config).fit(domain.normalize(observed_X), observed_y)
             predicted, posterior = surrogate.predict(domain.normalize(reference))
+            fitted_kernel_for_state = surrogate.frozen_kernel
 
         predicted_full = predicted
         posterior_full = posterior
@@ -314,6 +387,22 @@ def run_sequential_design(
             dominant_observation_is_anchor=dominant_anchor,
             dominant_observation_near_boundary=dominant_near_boundary,
             wall_time_seconds=perf_counter() - started,
+            selection_mode=(
+                selection_mode_label
+                if selection_mode_label is not None
+                else (
+                    "fixed_generic" if selection_result is None else selection_result.selection_mode
+                )
+            ),
+            profile=None if selection_result is None else selection_result.profile,
+            selected_kernel_id=(
+                "matern_32_ard" if selection_result is None else selection_result.selected_kernel_id
+            ),
+            current_length_scales=_length_scales_from_kernel(fitted_kernel_for_state),
+            selection_score=(
+                None if selection_result is None else selection_result.selection_score
+            ),
+            kernel_selection_result=selection_result,
         )
         states.append(state)
         if next_point is not None:
@@ -400,3 +489,14 @@ def _selection_diagnostics(
 def _near_boundary(domain: CandidateDomain, point: NDArray[np.float64], margin: float) -> bool:
     normalized = domain.normalize(point.reshape(1, -1))[0]
     return bool(np.min(np.minimum(normalized, 1.0 - normalized)) <= margin)
+
+
+def _length_scales_from_kernel(kernel: Any | None) -> tuple[float, ...]:
+    if kernel is None:
+        return ()
+    values: list[float] = []
+    for name, value in kernel.get_params(deep=True).items():
+        if "length_scale" in name:
+            array = np.asarray(value, dtype=float).reshape(-1)
+            values.extend(float(item) for item in array if np.isfinite(item))
+    return tuple(values)

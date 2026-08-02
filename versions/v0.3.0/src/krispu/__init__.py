@@ -2,6 +2,7 @@
 
 from krispu.config import GPRConfig, GprConfig
 from krispu.domains import ContinuousDomain, DiscreteCandidateDomain, MixedDomain, PolygonDomain
+from krispu.kernels import KernelSelectionConfig, KernelSelector, parse_kernel_configuration
 from krispu.observations import ObservationSet
 from krispu.recommender import KrispURecommender
 from krispu.results import Recommendation, RecommendationResult, UncertaintyDiagnostics
@@ -15,6 +16,8 @@ __all__ = [
     "GPRConfig",
     "GPRSurrogate",
     "GprConfig",
+    "KernelSelectionConfig",
+    "KernelSelector",
     "KrispURecommender",
     "MixedDomain",
     "ObservationSet",
@@ -23,4 +26,5 @@ __all__ = [
     "RecommendationResult",
     "ResponseStandardizer",
     "UncertaintyDiagnostics",
+    "parse_kernel_configuration",
 ]

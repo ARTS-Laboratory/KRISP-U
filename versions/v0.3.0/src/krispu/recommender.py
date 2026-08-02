@@ -79,6 +79,7 @@ class KrispURecommender:
             observations.y,
             observations.observation_variances,
         )
+        self.surrogate_ = surrogate
         predicted_mean, posterior_std = surrogate.predict(reference_normalized)
         loo = compute_bruteforce_loo(
             surrogate,

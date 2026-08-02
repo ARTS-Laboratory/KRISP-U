@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -28,6 +29,10 @@ class GPRConfig:
     n_restarts_optimizer: int = 0
     random_state: int | None = 0
     response_epsilon: float = 1e-12
+    # When provided, this is the complete kernel template to use instead of
+    # the historical Matérn-(3/2) default.  It is cloned before fitting.
+    kernel: Any | None = None
+    optimize_hyperparameters: bool = True
 
     def __post_init__(self) -> None:
         if self.noise_mode not in {"deterministic", "noisy"}:
