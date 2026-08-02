@@ -8,4 +8,5 @@ build/
 dist/
 *.egg-info/
 benchmark_outputs/
+benchmark_outputs_*/
 recommendation_outputs/

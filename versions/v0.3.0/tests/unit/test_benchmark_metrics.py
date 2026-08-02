@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from benchmarks.evaluation import reconstruction_metrics
+from benchmarks.evaluation import nrmse_auc, paired_difference, reconstruction_metrics
 from benchmarks.methods import lhs_order, maximin_index, random_order
 from krispu.domains import ContinuousDomain
 
@@ -34,3 +34,11 @@ def test_maximin_selects_farthest_candidate() -> None:
     domain = ContinuousDomain([[0.0, 1.0], [0.0, 1.0]])
     index = maximin_index(pool, observed, domain, np.array([True, True, False]))
     assert index == 0
+
+
+def test_nrmse_auc_uses_right_endpoint_increments() -> None:
+    assert nrmse_auc([5, 6, 8], [2.0, 3.0, 4.0]) == pytest.approx(11.0)
+
+
+def test_paired_difference_preserves_trial_alignment() -> None:
+    assert np.allclose(paired_difference([0.2, 0.4], [0.3, 0.1]), [-0.1, 0.3])

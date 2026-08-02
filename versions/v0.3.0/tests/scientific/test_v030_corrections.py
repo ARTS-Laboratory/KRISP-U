@@ -30,8 +30,7 @@ def test_canonical_score_is_exactly_krispu_uncertainty() -> None:
         loo_uncertainty_scores(result.diagnostics), result.diagnostics.krispu_uncertainty
     )
     assert (
-        result.recommendations[0].acquisition_score
-        == result.diagnostics.krispu_uncertainty.max()
+        result.recommendations[0].acquisition_score == result.diagnostics.krispu_uncertainty.max()
     )
 
 

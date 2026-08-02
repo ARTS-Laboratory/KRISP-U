@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import csv
 import json
+import platform
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -15,9 +17,16 @@ import numpy as np
 import yaml
 from scipy.stats import qmc
 
+from benchmarks.evaluation import nrmse_auc
 from benchmarks.fields import FIELD_FACTORIES
 from benchmarks.records import save_spatial_state
-from benchmarks.runner import _prepare_benchmark_output, _regular_grid
+from benchmarks.runner import (
+    _initial_design,
+    _make_field,
+    _normalize_config,
+    _prepare_benchmark_output,
+    _regular_grid,
+)
 from benchmarks.visualization import save_sequential_visuals
 from krispu import GPRConfig
 from krispu.candidates import generate_candidates
@@ -45,8 +54,11 @@ BASELINE_METHODS = (
 def run_kernel_selection_study(
     config_path: Path,
     output_root: Path = Path("benchmark_outputs"),
+    config: dict[str, Any] | None = None,
 ) -> Path:
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config = _normalize_config(
+        yaml.safe_load(config_path.read_text(encoding="utf-8")) if config is None else config
+    )
     _validate_study_config(config)
     output = _prepare_benchmark_output(output_root, config["experiment_name"])
     (output / "figures").mkdir(exist_ok=True)
@@ -66,17 +78,49 @@ def run_kernel_selection_study(
     source_schedules: dict[tuple[str, int], dict[int, tuple[str, Any]]] = {}
 
     for field_index, field_name in enumerate(config["fields"]):
-        field = FIELD_FACTORIES[field_name]()
+        field_seed = int(config["base_seed"]) + field_index * 100_000 + 1
+        field = _make_field(field_name, field_seed)
         evaluation = _regular_grid(field.domain, int(config["evaluation_grid_size"]))
         for trial in range(int(config["trials"])):
             trial_seed = int(config["base_seed"]) + field_index * 100_000 + trial * 10_000
             candidate_pool = generate_candidates(
                 field.domain, int(config["candidate_count"]), "lhs", trial_seed + 3
             )
-            initial = _initial_design(
-                field.domain, int(config["initial_sample_count"]), trial_seed + 2
+            initial_seed_list = config.get("initial_design_seeds")
+            initial_design_seed = (
+                int(initial_seed_list[trial % len(initial_seed_list)])
+                if initial_seed_list
+                else trial_seed + 2
+            )
+            initial, initial_loo_eligible = _initial_design(
+                config.get("initial_design", "interior_maximin"),
+                field.domain,
+                int(config["initial_sample_count"]),
+                float(config["initial_boundary_margin"]),
+                initial_design_seed,
+                return_eligibility=True,
             )
             true_evaluation = field.evaluate(evaluation)
+            reference_states = run_sequential_design(
+                field.evaluate,
+                field.domain,
+                initial,
+                candidate_pool,
+                evaluation,
+                "support_adjusted_krispu",
+                int(config["final_budget"]),
+                trial_seed + 90,
+                field_name=field_name,
+                trial=trial,
+                true_evaluation=true_evaluation,
+                gpr_config=GPRConfig(alpha=1e-6, random_state=trial_seed + 90),
+                initial_loo_eligible=initial_loo_eligible,
+                minimum_normalized_distance=_minimum_normalized_distance(config),
+                boundary_margin=float(config["initial_boundary_margin"]),
+            )
+            forced_points = np.asarray(
+                [state.recommended_point for state in reference_states[:-1]], dtype=float
+            )
             mode_states: dict[str, list[Any]] = {}
             for mode_index, mode in enumerate(MODE_NAMES):
                 mode_config = _mode_config(mode, field.metadata, config)
@@ -97,6 +141,8 @@ def run_kernel_selection_study(
                     boundary_margin=float(config["initial_boundary_margin"]),
                     kernel_selection_config=mode_config,
                     selection_mode_label=mode,
+                    initial_loo_eligible=initial_loo_eligible,
+                    forced_points=forced_points,
                 )
                 mode_states[mode] = states
                 for state in states:
@@ -237,7 +283,9 @@ def run_kernel_selection_study(
     _write_csv(output / "acquisition_isolation_pairs.csv", paired_rows)
     _write_csv(output / "kernel_recovery_matrix.csv", _aggregate_recovery(recovery_rows))
     _write_csv(output / "nrmse_auc.csv", _auc_rows(study_a_rows))
+    _write_manifest(output, config, config_path, history_rows)
     _write_figures(output, study_a_rows, study_a_final, candidate_rows, history_rows, paired_rows)
+    _write_structured_figures(output, study_a_rows, candidate_rows, history_rows)
     _write_report(output, study_a_final, paired_rows, config, history_rows)
     return output
 
@@ -256,15 +304,24 @@ def _mode_config(
     if mode == "fixed_generic":
         return None
     if mode == "automatic_standard":
-        return {"mode": "automatic", "candidate_set": "standard", **config["kernel_selection"]}
+        selection = {
+            key: value for key, value in config["kernel_selection"].items() if key != "enabled"
+        }
+        return {"mode": "automatic", "candidate_set": "standard", **selection}
     if mode == "hybrid_correct_profile":
+        selection = {
+            key: value for key, value in config["kernel_selection"].items() if key != "enabled"
+        }
         return {
             "mode": "hybrid",
             "profile": profiles.get(family, "smooth_global"),
-            **config["kernel_selection"],
+            **selection,
         }
     if mode == "hybrid_broad_profile":
-        return {"mode": "hybrid", "profile": "broad_standard", **config["kernel_selection"]}
+        selection = {
+            key: value for key, value in config["kernel_selection"].items() if key != "enabled"
+        }
+        return {"mode": "hybrid", "profile": "broad_standard", **selection}
     if mode == "manual_correct":
         return {
             "mode": "manual",
@@ -344,7 +401,7 @@ def _manual_mismatch_spec(family: str) -> dict[str, Any]:
     return {"type": "matern", "nu": 0.5, "length_scale_initial": [0.12, 0.12]}
 
 
-def _initial_design(domain: Any, count: int, seed: int) -> np.ndarray:
+def _legacy_lhs_initial_design(domain: Any, count: int, seed: int) -> np.ndarray:
     design = qmc.LatinHypercube(d=domain.dimension, seed=seed).random(count)
     return domain.denormalize(design)
 
@@ -409,9 +466,9 @@ def _auc_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "selection_mode": mode,
                 "trial": trial,
                 "nrmse_auc": float(
-                    np.trapz(
-                        [float(row["nrmse"]) for row in values],
+                    nrmse_auc(
                         [int(row["sample_count"]) for row in values],
+                        [float(row["nrmse"]) for row in values],
                     )
                 ),
                 "final_nrmse": float(values[-1]["nrmse"]),
@@ -540,6 +597,132 @@ def _write_figures(
     for axis in axes:
         axis.grid(alpha=0.25)
     _save(figure, figures / "kernel_diagnostics.png")
+
+
+def _write_structured_figures(
+    output: Path,
+    rows: list[dict[str, Any]],
+    candidate_rows: list[dict[str, Any]],
+    history_rows: list[dict[str, Any]],
+) -> None:
+    """Write per-field figures with names suitable for automated inspection."""
+
+    directories = {
+        name: output / "figures" / name
+        for name in ("kernel_selection", "kernel_hyperparameters", "kernel_mode_comparison")
+    }
+    for directory in directories.values():
+        directory.mkdir(parents=True, exist_ok=True)
+    fields = sorted({str(row["field"]) for row in rows})
+    for field in fields:
+        field_rows = [row for row in rows if row["field"] == field]
+        figure, axis = plt.subplots(figsize=(9, 5), constrained_layout=True)
+        for mode in MODE_NAMES:
+            values = sorted(
+                [row for row in field_rows if row.get("selection_mode") == mode],
+                key=lambda row: int(row["sample_count"]),
+            )
+            if values:
+                axis.plot(
+                    [int(row["sample_count"]) for row in values],
+                    [float(row["nrmse"]) for row in values],
+                    marker="o",
+                    label=mode,
+                )
+        axis.set(title=f"Kernel-mode NRMSE learning curves | {field}", xlabel="measurements")
+        axis.set_ylabel("NRMSE")
+        axis.grid(alpha=0.25)
+        axis.legend(fontsize=7)
+        _save(figure, directories["kernel_mode_comparison"] / f"{field}_nrmse.png")
+
+        field_history = [row for row in history_rows if row.get("field") == field]
+        figure, axis = plt.subplots(figsize=(9, 5), constrained_layout=True)
+        for mode in MODE_NAMES:
+            values = sorted(
+                [row for row in field_history if row.get("selection_mode") == mode],
+                key=lambda row: int(row["sample_count"]),
+            )
+            if values:
+                axis.step(
+                    [int(row["sample_count"]) for row in values],
+                    [str(row["selected_kernel_id"]) for row in values],
+                    where="post",
+                    label=mode,
+                )
+        axis.set(title=f"Kernel-selection timeline | {field}", xlabel="measurements")
+        axis.set_ylabel("selected kernel ID")
+        axis.legend(fontsize=7)
+        axis.grid(alpha=0.25)
+        _save(figure, directories["kernel_selection"] / f"{field}_kernel_timeline.png")
+
+        field_candidates = [row for row in candidate_rows if row.get("field") == field]
+        if field_candidates:
+            figure, axes = plt.subplots(2, 3, figsize=(13, 7), constrained_layout=True)
+            metrics = (
+                ("selection_score", "total selection score"),
+                ("spatial_cv_nrmse", "spatial CV NRMSE"),
+                ("spatial_cv_nlpd", "spatial CV NLPD"),
+                ("loo_nrmse", "LOO NRMSE"),
+                ("loo_nlpd", "LOO NLPD"),
+                ("degeneracy_penalty", "degeneracy penalty"),
+            )
+            for axis, (key, title) in zip(axes.flat, metrics, strict=True):
+                for kernel_id in sorted(
+                    {str(row["candidate_kernel_id"]) for row in field_candidates}
+                ):
+                    values = [
+                        row for row in field_candidates if row["candidate_kernel_id"] == kernel_id
+                    ]
+                    numeric = [float(row[key]) for row in values if row.get(key) not in (None, "")]
+                    if numeric:
+                        axis.plot(
+                            [int(row["sample_count"]) for row in values[: len(numeric)]],
+                            numeric,
+                            ".-",
+                            label=kernel_id,
+                        )
+                axis.set_title(title)
+                axis.grid(alpha=0.2)
+            axes.flat[0].legend(fontsize=6, ncol=2)
+            figure.suptitle(f"Candidate-kernel scores and rejection diagnostics | {field}")
+            _save(figure, directories["kernel_selection"] / f"{field}_candidate_scores.png")
+
+        figure, axes = plt.subplots(1, 2, figsize=(11, 4), constrained_layout=True)
+        for mode in MODE_NAMES:
+            values = sorted(
+                [row for row in field_history if row.get("selection_mode") == mode],
+                key=lambda row: int(row["sample_count"]),
+            )
+            for row in values:
+                parameters = row.get("optimized_hyperparameters", {})
+                if isinstance(parameters, str):
+                    try:
+                        parameters = json.loads(parameters)
+                    except json.JSONDecodeError:
+                        parameters = {}
+                scales = [
+                    float(item)
+                    for name, value in parameters.items()
+                    if "length_scale" in name
+                    for item in np.asarray(value, dtype=float).reshape(-1)
+                ]
+                if scales:
+                    axes[0].scatter([int(row["sample_count"])] * len(scales), scales, label=mode)
+                amplitudes = [
+                    float(item)
+                    for name, value in parameters.items()
+                    if "constant_value" in name
+                    for item in np.asarray(value, dtype=float).reshape(-1)
+                ]
+                if amplitudes:
+                    axes[1].scatter([int(row["sample_count"])] * len(amplitudes), amplitudes)
+        axes[0].set_title("ARD and long/short length scales")
+        axes[1].set_title("Kernel amplitudes")
+        for axis in axes:
+            axis.set_xlabel("measurements")
+            axis.grid(alpha=0.25)
+        axes[0].legend(fontsize=7)
+        _save(figure, directories["kernel_hyperparameters"] / f"{field}_hyperparameters.png")
 
 
 def _write_figures_legacy(
@@ -770,7 +953,65 @@ def _write_report(
             "",
         )
     )
-    (output / "kernel_selection_report.md").write_text("\n".join(lines), encoding="utf-8")
+    report = "\n".join(lines) + "\n"
+    (output / "kernel_selection_report.md").write_text(report, encoding="utf-8")
+    (output / "benchmark_report.md").write_text(report, encoding="utf-8")
+
+
+def _write_manifest(
+    output: Path,
+    config: dict[str, Any],
+    config_path: Path,
+    history_rows: list[dict[str, Any]],
+) -> None:
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        commit = None
+    dependencies: dict[str, str | None] = {}
+    for name in ("numpy", "scipy", "sklearn", "matplotlib", "yaml", "PIL"):
+        try:
+            module = __import__(name)
+            dependencies[name] = getattr(module, "__version__", None)
+        except ImportError:
+            dependencies[name] = None
+    selected = [
+        {
+            "field": row.get("field"),
+            "trial": row.get("trial"),
+            "sample_count": row.get("sample_count"),
+            "selection_mode": row.get("selection_mode"),
+            "selected_kernel_id": row.get("selected_kernel_id"),
+            "optimized_hyperparameters": row.get("optimized_hyperparameters"),
+        }
+        for row in history_rows
+    ]
+    manifest = {
+        "git_commit": commit,
+        "package_version": "0.3.0",
+        "python_version": platform.python_version(),
+        "dependency_versions": dependencies,
+        "configuration": config,
+        "configuration_path": str(config_path),
+        "field_seeds": {
+            field: int(config["base_seed"]) + index * 100_000 + 1
+            for index, field in enumerate(config["fields"])
+        },
+        "initial_design_seeds": config.get("initial_design_seeds"),
+        "candidate_seeds": "base_seed + field_index*100000 + trial*10000 + 3",
+        "noise_seeds": config.get("noise_seed"),
+        "method_seeds": "trial_seed + 100 + method_index",
+        "kernel_selection_seeds": config.get("kernel_selection", {}).get("random_state"),
+        "selected_kernels": selected,
+        "metric_definitions": {
+            "nrmse": "RMSE / true-field range",
+            "nrmse_auc": "sum of right-endpoint NRMSE times sample-count increments",
+            "paired_difference": "KRISP-U metric minus paired baseline metric",
+        },
+    }
+    (output / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
 def _curve(rows: list[dict[str, Any]], key: str) -> tuple[np.ndarray, np.ndarray]:

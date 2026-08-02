@@ -47,11 +47,15 @@ def main() -> None:
 
 
 def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs")) -> Path:
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config = _normalize_config(yaml.safe_load(config_path.read_text(encoding="utf-8")))
     if config.get("study") == "kernel_selection":
         from benchmarks.kernel_study import run_kernel_selection_study
 
-        return run_kernel_selection_study(config_path, output_root)
+        return run_kernel_selection_study(config_path, output_root, config=config)
+    if config.get("study") == "acquisition_comparison":
+        from benchmarks.acquisition_study import run_acquisition_comparison_study
+
+        return run_acquisition_comparison_study(config, output_root)
     if not config.get("include_noisy_field", True):
         config["fields"] = [
             field for field in config["fields"] if field not in {"noisy", "noisy_baseline"}
@@ -60,6 +64,7 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
         {
             "krispu_loo": "support_adjusted_krispu",
             "loo_uncertainty": "support_adjusted_krispu",
+            "krispu": "support_adjusted_krispu",
         }.get(method, method)
         for method in config["methods"]
     ]
@@ -101,13 +106,19 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
     component_records: list[dict[str, Any]] = []
     diagnostic_states: dict[str, list[Any]] = {}
     for field_index, field_name in enumerate(config["fields"]):
-        field = FIELD_FACTORIES[field_name]()
+        field_seed = int(config["base_seed"]) + field_index * 100_000 + 1
+        field = _make_field(field_name, field_seed)
         evaluation = _regular_grid(field.domain, int(config["evaluation_grid_size"]))
         field_final: dict[str, Any] = {}
         for trial in range(int(config["trials"])):
             trial_seed = int(config["base_seed"]) + field_index * 100_000 + trial * 10_000
             field_seed = trial_seed + 1
-            initial_design_seed = trial_seed + 2
+            initial_seed_list = config.get("initial_design_seeds")
+            initial_design_seed = (
+                int(initial_seed_list[trial % len(initial_seed_list)])
+                if initial_seed_list
+                else trial_seed + 2
+            )
             candidate_seed = trial_seed + 3
             candidate_pool = generate_candidates(
                 field.domain, int(config["candidate_count"]), "lhs", candidate_seed
@@ -145,7 +156,10 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
                     field_name=field_name,
                     trial=trial,
                     true_evaluation=true_evaluation,
-                    gpr_config=GPRConfig(random_state=method_seed),
+                    gpr_config=GPRConfig(
+                        random_state=method_seed,
+                        optimize_hyperparameters=bool(config.get("optimize_hyperparameters", True)),
+                    ),
                     initial_loo_eligible=initial_loo_eligible,
                     minimum_normalized_distance=minimum_normalized_distance,
                     boundary_margin=float(config["initial_boundary_margin"]),
@@ -169,17 +183,19 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
                         snapshot_every=config.get("snapshot_every"),
                         snapshot_sample_counts=config.get("snapshot_sample_counts"),
                         frame_duration_ms=int(config.get("frame_duration_ms", 500)),
+                        final_frame_duration_ms=int(config.get("final_frame_duration_ms", 1500)),
                         dpi=int(config.get("dpi", 150)),
                         annotate_point_order=bool(config.get("annotate_point_order", True)),
                         save_point_layout_gif=bool(
                             config.get("save_point_layout_animations", False)
                         ),
                         save_snapshot_gif=bool(config.get("save_snapshot_gifs", True)),
+                        save_contact_sheet=bool(config.get("save_contact_sheet", True)),
                     )
                 if method == "support_adjusted_krispu" and trial == 0:
                     diagnostic_states.setdefault(field_name, []).extend(states)
                     snapshot_counts = {
-                        int(value) for value in config.get("snapshot_sample_counts", [])
+                        int(value) for value in (config.get("snapshot_sample_counts") or [])
                     }
                     for state in states:
                         if state.sample_count in snapshot_counts:
@@ -286,17 +302,17 @@ def run_benchmark(config_path: Path, output_root: Path = Path("benchmark_outputs
 
 
 def _prepare_benchmark_output(output_root: Path, experiment_name: str) -> Path:
-    """Replace the dedicated output root with the current benchmark run."""
+    """Replace one named run while preserving sibling studies in the root."""
     output_root = output_root.resolve()
     if output_root == Path.cwd().resolve() or output_root.parent == output_root:
         raise ValueError("output_root must be a dedicated directory")
     output_root.mkdir(parents=True, exist_ok=True)
-    for child in output_root.iterdir():
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child, onerror=_remove_readonly)
-        else:
-            child.unlink()
     output = output_root / experiment_name
+    if output.exists():
+        if output.is_dir() and not output.is_symlink():
+            shutil.rmtree(output, onerror=_remove_readonly)
+        else:
+            output.unlink()
     output.mkdir(parents=True, exist_ok=True)
     return output
 
@@ -343,8 +359,13 @@ def _validate_config(config: dict[str, Any]) -> None:
         raise ValueError(f"Unknown methods: {sorted(unknown_methods)}")
     if config["initial_sample_count"] != 5:
         raise ValueError("The v0.3.0 audit uses a five-point initial design.")
-    if config["initial_design"] not in {"interior_maximin", "anchored_boundary"}:
-        raise ValueError("initial_design must be interior_maximin or anchored_boundary.")
+    if config["initial_design"] not in {
+        "interior_maximin",
+        "random_interior",
+        "lhs_interior",
+        "anchored_boundary",
+    }:
+        raise ValueError("Unknown initial_design.")
     if not 0 <= float(config["initial_boundary_margin"]) < 0.5:
         raise ValueError("initial_boundary_margin must be in [0, 0.5).")
     if _minimum_normalized_distance(config) < 0:
@@ -381,6 +402,23 @@ def _initial_design(
         design = domain.denormalize(normalized)
         eligibility = np.array([False, True, True, True, True])
         return (design, eligibility) if return_eligibility else design
+    if name in {"random_interior", "lhs_interior"}:
+        candidates = generate_candidates(domain, max(100, sample_count * 50), "lhs", random_state)
+        normalized = domain.normalize(candidates)
+        interior = candidates[
+            np.all((normalized >= boundary_margin) & (normalized <= 1.0 - boundary_margin), axis=1)
+        ]
+        if len(interior) < sample_count:
+            raise ValueError("The interior candidate set is too small for the initial design.")
+        if name == "random_interior":
+            selected = np.random.default_rng(random_state).choice(
+                len(interior), size=sample_count, replace=False
+            )
+        else:
+            selected = np.arange(sample_count)
+        design = interior[np.asarray(selected)].copy()
+        eligibility = np.ones(sample_count, dtype=bool)
+        return (design, eligibility) if return_eligibility else design
     if name != "interior_maximin":
         raise ValueError("Unknown initial design.")
     oversampled = generate_candidates(domain, max(500, sample_count * 100), "lhs", random_state)
@@ -401,6 +439,16 @@ def _initial_design(
     design = interior[np.asarray(selected)].copy()
     eligibility = np.ones(sample_count, dtype=bool)
     return (design, eligibility) if return_eligibility else design
+
+
+def _make_field(field_name: str, seed: int) -> Any:
+    """Construct a field with its stored seed when the factory supports one."""
+
+    factory = FIELD_FACTORIES[field_name]
+    try:
+        return factory(seed=seed)
+    except TypeError:
+        return factory()
 
 
 def _summary_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -468,6 +516,61 @@ def _minimum_normalized_distance(config: dict[str, Any]) -> float:
     if not np.isfinite(result) or result < 0:
         raise ValueError("minimum_normalized_distance must be finite and non-negative.")
     return result
+
+
+def _normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
+    """Accept the compact nested YAML schema and retain legacy flat configs."""
+
+    config = dict(raw or {})
+    benchmark = dict(config.get("benchmark", {}))
+    visualization = dict(config.get("visualization", {}))
+    initial = config.get("initial_design", "interior_maximin")
+    if isinstance(initial, dict):
+        config["initial_design"] = initial.get("name", "interior_maximin")
+        if "sample_count" in initial:
+            config["initial_sample_count"] = initial["sample_count"]
+        if "boundary_margin" in initial:
+            config["initial_boundary_margin"] = initial["boundary_margin"]
+    for key in (
+        "trials",
+        "initial_design_seeds",
+        "final_budget",
+        "candidate_count",
+        "evaluation_grid_size",
+        "base_seed",
+        "initial_sample_count",
+    ):
+        if key in benchmark:
+            config[key] = benchmark[key]
+    for key, target in (
+        ("save_gif", "save_gifs"),
+        ("save_frames", "save_png_snapshots"),
+        ("save_contact_sheet", "save_contact_sheet"),
+        ("frame_duration_ms", "frame_duration_ms"),
+        ("final_frame_duration_ms", "final_frame_duration_ms"),
+        ("snapshot_every", "snapshot_every"),
+        ("snapshot_sample_counts", "snapshot_sample_counts"),
+        ("annotate_sample_order", "annotate_point_order"),
+        ("dpi", "dpi"),
+        ("save_pdf", "save_pdf"),
+        ("optimize_hyperparameters", "optimize_hyperparameters"),
+    ):
+        if key in visualization:
+            config[target] = visualization[key]
+    candidate_validity = dict(config.get("candidate_validity", {}))
+    if "minimum_physical_spacing" in benchmark:
+        candidate_validity["minimum_normalized_distance"] = benchmark["minimum_physical_spacing"]
+    config["candidate_validity"] = candidate_validity
+    config.setdefault("methods", ["support_adjusted_krispu"])
+    config.setdefault("initial_design", "interior_maximin")
+    config.setdefault("initial_sample_count", 5)
+    config.setdefault("initial_boundary_margin", 0.05)
+    config.setdefault("base_seed", 202603)
+    config.setdefault("save_contact_sheet", True)
+    config.setdefault("final_frame_duration_ms", 1500)
+    config.setdefault("save_png_snapshots", config.get("save_frames", False))
+    config.setdefault("save_gifs", config.get("save_gif", False))
+    return config
 
 
 def _regular_grid(domain: Any, size: int) -> np.ndarray:

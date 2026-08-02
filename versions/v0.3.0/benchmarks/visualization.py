@@ -54,10 +54,12 @@ def save_sequential_visuals(
     snapshot_every: int | None = None,
     snapshot_sample_counts: Iterable[int] | None = None,
     frame_duration_ms: int = 500,
+    final_frame_duration_ms: int = 1500,
     dpi: int = 150,
     annotate_point_order: bool = True,
     save_point_layout_gif: bool = True,
     save_snapshot_gif: bool = True,
+    save_contact_sheet: bool = True,
 ) -> dict[str, list[Path] | Path | None]:
     """Save panel frames, optional GIFs, and optional point-layout GIFs for one run."""
 
@@ -68,9 +70,10 @@ def save_sequential_visuals(
     output_root.mkdir(parents=True, exist_ok=True)
     selection_mode = getattr(states[0], "selection_mode", "fixed_generic")
     run_key = f"{selection_mode}_{states[0].method}_{states[0].trial}"
-    snapshot_dir = output_root / "snapshots" / states[0].field / run_key
-    animation_dir = output_root / "animations" / states[0].field / run_key
-    point_dir = output_root / "point_progress" / states[0].field / run_key
+    snapshot_dir = output_root / "snapshots" / "frames"
+    animation_dir = output_root / "animations" / "process"
+    point_dir = output_root / "animations" / "point_progress"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
     scales = _run_scales(states)
     frames: list[Image.Image] = []
     snapshot_frames: list[Image.Image] = []
@@ -85,25 +88,85 @@ def save_sequential_visuals(
     )
     for state in states:
         figure = panel_figure(state, scales, annotate_point_order=annotate_point_order)
-        if save_gif:
-            frames.append(_figure_image(figure))
+        if save_gif or save_snapshots:
+            image = _figure_image(figure)
+            frames.append(image)
+            if save_snapshots:
+                frame_path = snapshot_dir / (
+                    f"{state.field}_{state.method}_{state.selection_mode}_trial"
+                    f"{state.trial}_n{state.sample_count:04d}.png"
+                )
+                frame_path.parent.mkdir(parents=True, exist_ok=True)
+                image.save(frame_path)
+                frame_paths.append(frame_path)
         if save_snapshots and state.sample_count in snapshot_counts:
-            path = snapshot_dir / f"n{state.sample_count:04d}.png"
+            path = (
+                output_root
+                / "snapshots"
+                / "selected"
+                / (
+                    f"{state.field}_{state.method}_{state.selection_mode}_trial"
+                    f"{state.trial}_n{state.sample_count:04d}.png"
+                )
+            )
             _save_figure(figure, path, dpi)
+            _save_figure(
+                figure,
+                output_root
+                / "snapshots"
+                / states[0].field
+                / run_key
+                / f"n{state.sample_count:04d}.png",
+                dpi,
+            )
             if save_snapshot_gif:
                 snapshot_frames.append(_figure_image(figure))
-            frame_paths.append(path)
         plt.close(figure)
 
     animation_path: Path | None = None
     snapshot_animation_path: Path | None = None
     point_animation_path: Path | None = None
     if save_gif:
-        animation_path = animation_dir / "panel.gif"
-        _save_gif(frames, animation_path, frame_duration_ms)
+        animation_path = animation_dir / (
+            f"{states[0].field}_{states[0].method}_{states[0].selection_mode}_trial"
+            f"{states[0].trial}_process.gif"
+        )
+        durations = [frame_duration_ms] * len(frames)
+        durations[-1] = final_frame_duration_ms
+        _save_gif(frames, animation_path, durations)
+        _save_gif(
+            frames,
+            output_root / "animations" / states[0].field / run_key / "panel.gif",
+            durations,
+        )
     if save_snapshots and save_snapshot_gif:
-        snapshot_animation_path = snapshot_dir / "panel_snapshots.gif"
+        snapshot_animation_path = (
+            output_root
+            / "animations"
+            / "process"
+            / (
+                f"{states[0].field}_{states[0].method}_{states[0].selection_mode}_trial"
+                f"{states[0].trial}_snapshots.gif"
+            )
+        )
         _save_gif(snapshot_frames, snapshot_animation_path, frame_duration_ms)
+        _save_gif(
+            snapshot_frames,
+            output_root / "snapshots" / states[0].field / run_key / "panel_snapshots.gif",
+            frame_duration_ms,
+        )
+    contact_sheet_path: Path | None = None
+    if save_contact_sheet and save_snapshots:
+        contact_sheet_path = (
+            output_root
+            / "snapshots"
+            / "contact_sheets"
+            / (
+                f"{states[0].field}_{states[0].method}_{states[0].selection_mode}_trial"
+                f"{states[0].trial}_contact_sheet.png"
+            )
+        )
+        _save_contact_sheet(states, scales, snapshot_counts, contact_sheet_path, dpi)
     if save_point_layout_gif:
         point_frames = [
             _figure_image(
@@ -114,11 +177,32 @@ def save_sequential_visuals(
         ]
         point_animation_path = point_dir / "points.gif"
         _save_gif(point_frames, point_animation_path, frame_duration_ms)
+        _save_gif(
+            point_frames,
+            output_root / "point_progress" / states[0].field / run_key / "points.gif",
+            frame_duration_ms,
+        )
+    point_snapshot_path = (
+        output_root
+        / "snapshots"
+        / "sampling_paths"
+        / (
+            f"{states[0].field}_{states[0].method}_{states[0].selection_mode}_trial"
+            f"{states[0].trial}_sampling_path.png"
+        )
+    )
+    _save_figure(
+        point_layout_figure(states[-1], annotate_point_order=annotate_point_order),
+        point_snapshot_path,
+        dpi,
+    )
     return {
         "animation": animation_path,
         "snapshots": frame_paths,
         "snapshot_animation": snapshot_animation_path,
         "point_animation": point_animation_path,
+        "point_snapshot": point_snapshot_path,
+        "contact_sheet": contact_sheet_path,
     }
 
 
@@ -164,7 +248,8 @@ def panel_figure(
     figure.text(
         0.5,
         0.01,
-        f"mode={state.selection_mode} | kernel={state.selected_kernel_id} | "
+        f"acquisition={uncertainty_label} | mode={state.selection_mode} | "
+        f"kernel={state.selected_kernel_id} | "
         f"length scales=[{scales_text}]",
         ha="center",
         fontsize=8,
@@ -256,10 +341,14 @@ def plot_method_comparisons(
 
 
 def _uncertainty(state: Any) -> tuple[np.ndarray, str]:
-    if state.krispu_uncertainty is not None:
+    if getattr(state, "acquisition_field", None) is not None:
+        return state.acquisition_field, state.acquisition_label
+    if state.method == "raw_loo_sensitivity" and state.loo_field_sensitivity is not None:
+        return state.loo_field_sensitivity, "raw LOO field sensitivity"
+    if state.method == "support_adjusted_krispu" and state.krispu_uncertainty is not None:
         return state.krispu_uncertainty, "KRISP-U uncertainty"
     if state.posterior_std is not None:
-        return state.posterior_std, "GP posterior std"
+        return state.posterior_std, "GP posterior standard deviation"
     raise ValueError("A fitted-surrogate uncertainty field is required for visualization.")
 
 
@@ -332,11 +421,64 @@ def _save_figure(figure: Any, path: Path, dpi: int) -> None:
     figure.savefig(path, dpi=dpi, bbox_inches="tight")
 
 
-def _save_gif(frames: list[Image.Image], path: Path, duration_ms: int) -> None:
+def _save_gif(frames: list[Image.Image], path: Path, duration_ms: int | list[int]) -> None:
     if not frames:
         raise ValueError("Cannot write a GIF without frames.")
     path.parent.mkdir(parents=True, exist_ok=True)
     frames[0].save(path, save_all=True, append_images=frames[1:], duration=duration_ms, loop=0)
+
+
+def _save_contact_sheet(
+    states: list[Any],
+    scales: dict[str, tuple[float, float]],
+    counts: set[int],
+    path: Path,
+    dpi: int,
+) -> None:
+    selected = [state for state in states if state.sample_count in counts]
+    if not selected:
+        return
+    columns = ("true", "predicted", "uncertainty", "error")
+    figure, axes = plt.subplots(
+        len(selected), len(columns), figsize=(12, 3 * len(selected)), squeeze=False
+    )
+    for row_index, state in enumerate(selected):
+        x, y = _grid_axes(state.evaluation_points)
+        uncertainty, uncertainty_label = _uncertainty(state)
+        fields = (
+            state.true_field,
+            state.predicted_field,
+            uncertainty,
+            state.metrics.absolute_error,
+        )
+        titles = ("True", "Reconstruction", uncertainty_label, "Absolute error")
+        for column, (values, title) in enumerate(zip(fields, titles, strict=True)):
+            limits = (
+                scales["true"]
+                if column < 2
+                else scales["uncertainty"] if column == 2 else scales["error"]
+            )
+            image = axes[row_index, column].pcolormesh(
+                x,
+                y,
+                values.reshape(len(y), len(x)),
+                shading="auto",
+                cmap="viridis" if column < 2 else "magma",
+                vmin=limits[0],
+                vmax=limits[1],
+            )
+            _overlay_points(axes[row_index, column], state, True)
+            axes[row_index, column].set(
+                xlim=(-1, 1), ylim=(-1, 1), aspect="equal", title=f"n={state.sample_count}: {title}"
+            )
+            figure.colorbar(image, ax=axes[row_index, column], shrink=0.75)
+    figure.suptitle(
+        f"Snapshot contact sheet | {states[0].field} | {states[0].method} | "
+        f"{states[0].selection_mode} | trial {states[0].trial}"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(path, dpi=dpi, bbox_inches="tight")
+    plt.close(figure)
 
 
 def _derived_diagnostics(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -129,9 +129,7 @@ def valid_candidate_mask(
         raise ValueError("observed must contain at least one point.")
     exact_observed = np.any(
         np.all(
-            np.isclose(
-                values[:, None, :], observed_values[None, :, :], atol=1e-10, rtol=0.0
-            ),
+            np.isclose(values[:, None, :], observed_values[None, :, :], atol=1e-10, rtol=0.0),
             axis=2,
         ),
         axis=1,

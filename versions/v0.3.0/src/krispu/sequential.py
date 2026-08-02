@@ -67,6 +67,8 @@ class SequentialState:
     current_length_scales: tuple[float, ...] = ()
     selection_score: float | None = None
     kernel_selection_result: KernelSelectionResult | None = None
+    acquisition_field: NDArray[np.float64] | None = None
+    acquisition_label: str = "GP posterior standard deviation"
 
     @property
     def jackknife_std(self) -> NDArray[np.float64] | None:
@@ -142,6 +144,29 @@ class SequentialState:
             "selected_kernel_id": self.selected_kernel_id,
             "current_length_scales": ";".join(str(value) for value in self.current_length_scales),
             "selection_score": self.selection_score,
+            "mode": self.selection_mode,
+            "study": None,
+            "acquisition_field": self.acquisition_label,
+            "selection_event": (
+                self.kernel_selection_result is not None
+                and self.kernel_selection_result.selection_evaluated
+            ),
+            "switch_accepted": (
+                None
+                if self.kernel_selection_result is None
+                else self.kernel_selection_result.switch_accepted
+            ),
+            "switch_rejection_reason": (
+                None
+                if self.kernel_selection_result is None
+                else self.kernel_selection_result.switch_rejection_reason
+            ),
+            "parameters_at_bounds": None,
+            "selection_runtime": (
+                None
+                if self.kernel_selection_result is None
+                else self.kernel_selection_result.selection_runtime
+            ),
         }
 
 
@@ -166,6 +191,7 @@ def run_sequential_design(
     kernel_selection_config: KernelSelectionConfig | dict[str, Any] | None = None,
     kernel_schedule: dict[int, str | tuple[str, Any]] | None = None,
     selection_mode_label: str | None = None,
+    forced_points: ArrayLike | None = None,
 ) -> list[SequentialState]:
     """Run one paired-trial method with one fixed candidate pool."""
 
@@ -203,6 +229,11 @@ def run_sequential_design(
         raise ValueError("At least one initial observation must be LOO-eligible.")
     if len(pool) < final_budget - len(initial):
         raise ValueError("candidate_pool is too small for the requested final budget.")
+    forced = (
+        None if forced_points is None else domain.validate_points(forced_points, "forced_points")
+    )
+    if forced is not None and len(forced) != final_budget - len(initial):
+        raise ValueError("forced_points must contain one point per adaptive measurement.")
     true_values = (
         np.asarray(hidden_field(evaluation), dtype=float).reshape(-1)
         if true_evaluation is None
@@ -322,9 +353,9 @@ def run_sequential_design(
             loo_sensitivity = diagnostics.loo_field_sensitivity[:n_evaluation]
             support_deficit = diagnostics.kernel_support_deficit[:n_evaluation]
             krispu = diagnostics.krispu_uncertainty[:n_evaluation]
-            maximum_correlation = (
-                diagnostics.maximum_kernel_correlation_to_observations[:n_evaluation]
-            )
+            maximum_correlation = diagnostics.maximum_kernel_correlation_to_observations[
+                :n_evaluation
+            ]
             loo_means = diagnostics.loo_field_means[:n_evaluation]
             loo_residuals = diagnostics.loo_residuals.copy()
             loo_standardized = diagnostics.loo_standardized_residuals.copy()
@@ -351,7 +382,19 @@ def run_sequential_design(
         next_point = None
         selection = None
         if len(observed_X) < final_budget:
-            if method in {"support_adjusted_krispu", "raw_loo_sensitivity", "posterior_std"}:
+            if forced is not None:
+                next_point = forced[len(observed_X) - len(initial)].copy()
+                distances = np.linalg.norm(pool - next_point, axis=1)
+                selection = int(np.argmin(distances))
+                valid = valid_candidate_mask(
+                    domain,
+                    pool,
+                    observed_X,
+                    minimum_normalized_distance=minimum_normalized_distance,
+                )
+                if not valid[selection] or not available[selection]:
+                    raise ValueError("forced_points contains an invalid or repeated point.")
+            elif method in {"support_adjusted_krispu", "raw_loo_sensitivity", "posterior_std"}:
                 selection = _best_available(
                     pool,
                     available,
@@ -386,8 +429,11 @@ def run_sequential_design(
                     available,
                     minimum_normalized_distance=minimum_normalized_distance,
                 )
-            available[selection] = False
-            next_point = pool[selection].copy()
+            if forced is None:
+                available[selection] = False
+                next_point = pool[selection].copy()
+            else:
+                available[selection] = False
 
         selection_values = _selection_diagnostics(
             domain,
@@ -431,9 +477,7 @@ def run_sequential_design(
             predicted_field=predicted.copy(),
             posterior_std=posterior.copy(),
             loo_field_sensitivity=None if loo_sensitivity is None else loo_sensitivity.copy(),
-            kernel_support_deficit=(
-                None if support_deficit is None else support_deficit.copy()
-            ),
+            kernel_support_deficit=(None if support_deficit is None else support_deficit.copy()),
             krispu_uncertainty=None if krispu is None else krispu.copy(),
             maximum_kernel_correlation_to_observations=(
                 None if maximum_correlation is None else maximum_correlation.copy()
@@ -480,6 +524,24 @@ def run_sequential_design(
                 None if selection_result is None else selection_result.selection_score
             ),
             kernel_selection_result=selection_result,
+            acquisition_field=(
+                krispu.copy()
+                if method == "support_adjusted_krispu" and krispu is not None
+                else (
+                    loo_sensitivity.copy()
+                    if method == "raw_loo_sensitivity" and loo_sensitivity is not None
+                    else posterior.copy()
+                )
+            ),
+            acquisition_label=(
+                "support-adjusted KRISP-U uncertainty"
+                if method == "support_adjusted_krispu"
+                else (
+                    "raw LOO field sensitivity"
+                    if method == "raw_loo_sensitivity"
+                    else "GP posterior standard deviation"
+                )
+            ),
         )
         states.append(state)
         if next_point is not None:

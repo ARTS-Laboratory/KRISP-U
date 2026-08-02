@@ -1,0 +1,20 @@
+experiment_name: ci_smoke
+fields: [smooth]
+methods: [krispu, raw_loo_sensitivity, posterior_std, random, lhs, maximin]
+initial_design:
+  name: interior_maximin
+  sample_count: 5
+  boundary_margin: 0.05
+benchmark:
+  trials: 1
+  initial_design_seeds: [17]
+  final_budget: 7
+  candidate_count: 32
+  evaluation_grid_size: 12
+  base_seed: 202603
+  minimum_physical_spacing: 0.05
+visualization:
+  save_gif: false
+  save_frames: false
+  save_contact_sheet: false
+  save_pdf: false

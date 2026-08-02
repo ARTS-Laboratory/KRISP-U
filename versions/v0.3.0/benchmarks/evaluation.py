@@ -19,6 +19,32 @@ class ReconstructionMetrics:
     squared_error: NDArray[np.float64]
 
 
+def nrmse_auc(sample_counts: ArrayLike, nrmse_values: ArrayLike) -> float:
+    """Integrate NRMSE using the benchmark's right-endpoint convention."""
+
+    counts = np.asarray(sample_counts, dtype=float).reshape(-1)
+    values = np.asarray(nrmse_values, dtype=float).reshape(-1)
+    if counts.shape != values.shape or len(counts) < 2:
+        raise ValueError("sample_counts and nrmse_values need at least two matching values.")
+    if not np.all(np.isfinite(counts)) or not np.all(np.isfinite(values)):
+        raise ValueError("sample_counts and nrmse_values must be finite.")
+    if np.any(np.diff(counts) <= 0):
+        raise ValueError("sample_counts must be strictly increasing.")
+    return float(np.sum(values[1:] * np.diff(counts)))
+
+
+def paired_difference(krispu: ArrayLike, baseline: ArrayLike) -> NDArray[np.float64]:
+    """Return paired ``KRISP-U - baseline`` differences."""
+
+    left = np.asarray(krispu, dtype=float)
+    right = np.asarray(baseline, dtype=float)
+    if left.shape != right.shape:
+        raise ValueError("paired metric arrays must have matching shapes.")
+    if not np.all(np.isfinite(left)) or not np.all(np.isfinite(right)):
+        raise ValueError("paired metric arrays must be finite.")
+    return left - right
+
+
 def reconstruction_metrics(y_true: ArrayLike, y_pred: ArrayLike) -> ReconstructionMetrics:
     truth = np.asarray(y_true, dtype=float).reshape(-1)
     prediction = np.asarray(y_pred, dtype=float).reshape(-1)

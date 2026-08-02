@@ -1,5 +1,5 @@
-study: kernel_selection
-experiment_name: kernel_selection_study
+study: acquisition_comparison
+experiment_name: acquisition_comparison
 fields: [smooth, localized, anisotropic, rough_correlated, rough_multiscale, periodic, trend_plus_local]
 initial_design:
   name: interior_maximin
@@ -7,7 +7,7 @@ initial_design:
   boundary_margin: 0.05
 benchmark:
   trials: 10
-  initial_design_seeds: [101, 103, 107, 109, 113]
+  initial_design_seeds: [201, 203, 211, 223, 227]
   final_budget: 30
   candidate_count: 1024
   evaluation_grid_size: 80
@@ -20,22 +20,13 @@ visualization:
   frame_duration_ms: 500
   final_frame_duration_ms: 1500
   snapshot_every: 2
-  dpi: 150
+  dpi: 180
   save_pdf: false
 kernel_selection:
   enabled: true
-  mode: automatic
-  selection_metric: spatial_cv_composite
-  optimizer_restarts: 0
   reevaluate_every: 3
   minimum_points_before_selection: 6
   minimum_score_improvement: 0.05
-  nlpd_weight: 0.5
-  nrmse_weight: 0.4
-  calibration_weight: 0.1
-  spatial_folds: 4
-visual_audit_fields: [smooth]
-visual_audit_modes: [fixed_generic, automatic_standard, hybrid_correct_profile]
-manual:
   optimizer_restarts: 0
-  optimize_hyperparameters: true
+  spatial_folds: 2
+  selection_metric: loo_predictive

@@ -44,6 +44,14 @@ RECORD_FIELDS = [
     "dominant_observation_is_anchor",
     "dominant_observation_near_boundary",
     "wall_time_seconds",
+    "mode",
+    "study",
+    "acquisition_field",
+    "selection_event",
+    "switch_accepted",
+    "switch_rejection_reason",
+    "parameters_at_bounds",
+    "selection_runtime",
 ]
 
 
@@ -64,6 +72,11 @@ def save_spatial_state(path: Path, state: Any) -> None:
         "squared_error": state.metrics.squared_error,
         "observed_X": state.observed_X,
         "evaluation_points": state.evaluation_points,
+        "acquisition_field": (
+            state.acquisition_field
+            if getattr(state, "acquisition_field", None) is not None
+            else np.array([], dtype=float)
+        ),
     }
     for name in (
         "posterior_std",
