@@ -1,4 +1,4 @@
-"""Finite, documented registry used by automatic and hybrid selection."""
+"""Finite registry of single global anisotropic spatial covariance families."""
 
 from __future__ import annotations
 
@@ -7,14 +7,16 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from sklearn.gaussian_process.kernels import (
-    RBF,
-    ConstantKernel,
-    DotProduct,
-    ExpSineSquared,
-    Matern,
-    RationalQuadratic,
-    WhiteKernel,
+from sklearn.gaussian_process.kernels import WhiteKernel
+
+from krispu.kernels.families import (
+    ExponentialARD,
+    GaussianARD,
+    Matern32ARD,
+    Matern52ARD,
+    RationalQuadraticARD,
+    SphericalARD,
+    WendlandC2ARD,
 )
 
 Builder = Callable[[int, bool], Any]
@@ -30,287 +32,101 @@ class KernelDefinition:
     profile_tags: tuple[str, ...]
     default_bounds: dict[str, tuple[float, float]]
     supports_measurement_noise: bool
+    spatial_components: int = 1
 
 
-def _bounds(value: tuple[float, float], optimize: bool) -> str | tuple[float, float]:
+def _bounds(value: tuple[float, float], optimize: bool) -> tuple[float, float] | str:
     return value if optimize else "fixed"
 
 
-def _amplitude_base(base: Any, amplitude: float, optimize: bool) -> Any:
-    return ConstantKernel(amplitude, constant_value_bounds=_bounds((1e-3, 5.0), optimize)) * base
-
-
-def _matern(dimension: int, optimize: bool, nu: float, initial: float = 0.25) -> Any:
-    return _amplitude_base(
-        Matern(
-            length_scale=np.full(dimension, initial),
-            length_scale_bounds=_bounds((0.02, 2.0), optimize),
-            nu=nu,
-        ),
-        1.0,
-        optimize,
+def _family(
+    family: type[Any],
+    dimension: int,
+    optimize: bool,
+    *,
+    rational_quadratic: bool = False,
+) -> Any:
+    if dimension < 1:
+        raise ValueError("dimension must be positive.")
+    if family in {SphericalARD, WendlandC2ARD} and dimension > 3:
+        raise ValueError(f"{family.__name__} supports dimensions one through three.")
+    scale_bounds: Any = (
+        np.broadcast_to(np.asarray((0.02, 2.0), dtype=float), (dimension, 2)).copy()
+        if optimize
+        else "fixed"
     )
+    kwargs: dict[str, Any] = {
+        "amplitude": 1.0,
+        "amplitude_bounds": _bounds((1e-3, 5.0), optimize),
+        "length_scale": np.full(dimension, 0.25, dtype=float),
+        "length_scale_bounds": scale_bounds,
+    }
+    if rational_quadratic:
+        kwargs.update({"alpha": 1.0, "alpha_bounds": _bounds((1e-3, 100.0), optimize)})
+    return family(**kwargs)
 
 
-def _rbf(dimension: int, optimize: bool) -> Any:
-    return _amplitude_base(
-        RBF(
-            length_scale=np.full(dimension, 0.25),
-            length_scale_bounds=_bounds((0.02, 2.0), optimize),
-        ),
-        1.0,
-        optimize,
-    )
+def _gaussian(dimension: int, optimize: bool) -> Any:
+    return _family(GaussianARD, dimension, optimize)
+
+
+def _exponential(dimension: int, optimize: bool) -> Any:
+    return _family(ExponentialARD, dimension, optimize)
+
+
+def _spherical(dimension: int, optimize: bool) -> Any:
+    return _family(SphericalARD, dimension, optimize)
+
+
+def _matern32(dimension: int, optimize: bool) -> Any:
+    return _family(Matern32ARD, dimension, optimize)
+
+
+def _matern52(dimension: int, optimize: bool) -> Any:
+    return _family(Matern52ARD, dimension, optimize)
 
 
 def _rational_quadratic(dimension: int, optimize: bool) -> Any:
-    return _amplitude_base(
-        RationalQuadratic(
-            length_scale=0.25,
-            alpha=1.0,
-            length_scale_bounds=_bounds((0.02, 2.0), optimize),
-            alpha_bounds=_bounds((1e-3, 100.0), optimize),
-        ),
-        1.0,
-        optimize,
-    )
+    return _family(RationalQuadraticARD, dimension, optimize, rational_quadratic=True)
 
 
-def _multiscale(
-    dimension: int,
-    optimize: bool,
-    long_nu: float,
-    short_nu: float,
-    long_amplitude: float = 1.0,
-    short_amplitude: float = 0.4,
-) -> Any:
-    long = _amplitude_base(
-        Matern(
-            length_scale=np.full(dimension, 0.6),
-            length_scale_bounds=_bounds((0.15, 2.0), optimize),
-            nu=long_nu,
-        ),
-        long_amplitude,
-        optimize,
-    )
-    short = _amplitude_base(
-        Matern(
-            length_scale=np.full(dimension, 0.08),
-            length_scale_bounds=_bounds((0.01, 0.20), optimize),
-            nu=short_nu,
-        ),
-        short_amplitude,
-        optimize,
-    )
-    return long + short
-
-
-def _rbf_multiscale(dimension: int, optimize: bool) -> Any:
-    long = _amplitude_base(
-        RBF(
-            length_scale=np.full(dimension, 0.6),
-            length_scale_bounds=_bounds((0.15, 2.0), optimize),
-        ),
-        1.0,
-        optimize,
-    )
-    short = _amplitude_base(
-        Matern(
-            length_scale=np.full(dimension, 0.08),
-            length_scale_bounds=_bounds((0.01, 0.20), optimize),
-            nu=0.5,
-        ),
-        0.4,
-        optimize,
-    )
-    return long + short
-
-
-def _linear_plus_matern(dimension: int, optimize: bool, nu: float) -> Any:
-    return DotProduct(
-        sigma_0=1.0,
-        sigma_0_bounds=_bounds((1e-5, 10.0), optimize),
-    ) + _matern(dimension, optimize, nu)
-
-
-def _periodic_times_matern(dimension: int, optimize: bool) -> Any:
-    periodic = ExpSineSquared(
-        length_scale=0.35,
-        periodicity=0.9,
-        length_scale_bounds=_bounds((0.02, 2.0), optimize),
-        periodicity_bounds=_bounds((0.2, 4.0), optimize),
-    )
-    return periodic * _matern(dimension, optimize, 1.5) + WhiteKernel(
-        noise_level=1.0,
-        noise_level_bounds=_bounds((1e-6, 10.0), optimize),
-    )
-
-
-def _periodic_plus_matern(dimension: int, optimize: bool) -> Any:
-    periodic = ExpSineSquared(
-        length_scale=0.35,
-        periodicity=0.9,
-        length_scale_bounds=_bounds((0.02, 2.0), optimize),
-        periodicity_bounds=_bounds((0.2, 4.0), optimize),
-    )
-    return (
-        periodic
-        + _matern(dimension, optimize, 1.5)
-        + WhiteKernel(
-            noise_level=1.0,
-            noise_level_bounds=_bounds((1e-6, 10.0), optimize),
-        )
-    )
-
-
-def _matern_52(dimension: int, optimize: bool) -> Any:
-    return _matern(dimension, optimize, 2.5)
-
-
-def _matern_32(dimension: int, optimize: bool) -> Any:
-    return _matern(dimension, optimize, 1.5)
-
-
-def _matern_12(dimension: int, optimize: bool) -> Any:
-    return _matern(dimension, optimize, 0.5)
+def _wendland(dimension: int, optimize: bool) -> Any:
+    return _family(WendlandC2ARD, dimension, optimize)
 
 
 KERNEL_REGISTRY: dict[str, KernelDefinition] = {
-    "matern_52_ard": KernelDefinition(
-        "matern_52_ard",
-        "Matérn-5/2 ARD",
-        _matern_52,
-        3,
-        "continuous",
-        ("smooth",),
-        {"length_scale": (0.02, 2.0), "amplitude": (1e-3, 5.0)},
-        True,
+    "gaussian_ard": KernelDefinition(
+        "gaussian_ard", "Gaussian ARD", _gaussian, 1, "continuous", ("smooth",),
+        {"length_scale": (0.02, 2.0), "amplitude": (1e-3, 5.0)}, True,
+    ),
+    "exponential_ard": KernelDefinition(
+        "exponential_ard", "Exponential ARD", _exponential, 1, "continuous", ("rough",),
+        {"length_scale": (0.02, 2.0), "amplitude": (1e-3, 5.0)}, True,
+    ),
+    "spherical_ard": KernelDefinition(
+        "spherical_ard", "Spherical ARD", _spherical, 1, (1, 2, 3), ("compact",),
+        {"length_scale": (0.02, 2.0), "amplitude": (1e-3, 5.0)}, True,
     ),
     "matern_32_ard": KernelDefinition(
-        "matern_32_ard",
-        "Matérn-3/2 ARD",
-        _matern_32,
-        3,
-        "continuous",
-        ("rough",),
-        {"length_scale": (0.02, 2.0), "amplitude": (1e-3, 5.0)},
-        True,
+        "matern_32_ard", "Matérn-3/2 ARD", _matern32, 1, "continuous", ("rough",),
+        {"length_scale": (0.02, 2.0), "amplitude": (1e-3, 5.0)}, True,
     ),
-    "matern_12_ard": KernelDefinition(
-        "matern_12_ard",
-        "Matérn-1/2 ARD",
-        _matern_12,
-        3,
-        "continuous",
-        ("rough",),
-        {"length_scale": (0.02, 2.0), "amplitude": (1e-3, 5.0)},
-        True,
+    "matern_52_ard": KernelDefinition(
+        "matern_52_ard", "Matérn-5/2 ARD", _matern52, 1, "continuous", ("smooth",),
+        {"length_scale": (0.02, 2.0), "amplitude": (1e-3, 5.0)}, True,
     ),
-    "rbf_ard": KernelDefinition(
-        "rbf_ard",
-        "RBF ARD",
-        _rbf,
-        3,
-        "continuous",
-        ("smooth",),
-        {"length_scale": (0.02, 2.0), "amplitude": (1e-3, 5.0)},
-        True,
+    "rational_quadratic_ard": KernelDefinition(
+        "rational_quadratic_ard", "Rational Quadratic ARD", _rational_quadratic, 2,
+        "continuous", ("multiscale",),
+        {"length_scale": (0.02, 2.0), "alpha": (1e-3, 100.0)}, True,
     ),
-    "rational_quadratic": KernelDefinition(
-        "rational_quadratic",
-        "Rational Quadratic",
-        _rational_quadratic,
-        4,
-        "continuous",
-        ("rough", "multiscale"),
-        {"length_scale": (0.02, 2.0), "alpha": (1e-3, 100.0)},
-        True,
-    ),
-    "matern_52_long_plus_matern_12_short": KernelDefinition(
-        "matern_52_long_plus_matern_12_short",
-        "Matérn-5/2 long + Matérn-1/2 short",
-        lambda dimension, optimize: _multiscale(dimension, optimize, 2.5, 0.5),
-        6,
-        "continuous",
-        ("multiscale",),
-        {"long_scale": (0.15, 2.0), "short_scale": (0.01, 0.20)},
-        True,
-    ),
-    "matern_32_long_plus_matern_12_short": KernelDefinition(
-        "matern_32_long_plus_matern_12_short",
-        "Matérn-3/2 long + Matérn-1/2 short",
-        lambda dimension, optimize: _multiscale(dimension, optimize, 1.5, 0.5),
-        6,
-        "continuous",
-        ("multiscale",),
-        {"long_scale": (0.15, 2.0), "short_scale": (0.01, 0.20)},
-        True,
-    ),
-    "matern_52_long_plus_matern_32_short": KernelDefinition(
-        "matern_52_long_plus_matern_32_short",
-        "Matérn-5/2 long + Matérn-3/2 short",
-        lambda dimension, optimize: _multiscale(dimension, optimize, 2.5, 1.5),
-        6,
-        "continuous",
-        ("multiscale",),
-        {"long_scale": (0.15, 2.0), "short_scale": (0.01, 0.20)},
-        True,
-    ),
-    "rbf_long_plus_matern_12_short": KernelDefinition(
-        "rbf_long_plus_matern_12_short",
-        "RBF long + Matérn-1/2 short",
-        _rbf_multiscale,
-        6,
-        "continuous",
-        ("multiscale",),
-        {"long_scale": (0.15, 2.0), "short_scale": (0.01, 0.20)},
-        True,
-    ),
-    "linear_plus_matern_32": KernelDefinition(
-        "linear_plus_matern_32",
-        "Linear + Matérn-3/2",
-        lambda d, o: _linear_plus_matern(d, o, 1.5),
-        4,
-        "continuous",
-        ("trend",),
-        {"length_scale": (0.02, 2.0)},
-        True,
-    ),
-    "linear_plus_matern_52": KernelDefinition(
-        "linear_plus_matern_52",
-        "Linear + Matérn-5/2",
-        lambda d, o: _linear_plus_matern(d, o, 2.5),
-        4,
-        "continuous",
-        ("trend",),
-        {"length_scale": (0.02, 2.0)},
-        True,
-    ),
-    "periodic_times_matern_32": KernelDefinition(
-        "periodic_times_matern_32",
-        "Periodic × Matérn-3/2",
-        _periodic_times_matern,
-        6,
-        "continuous",
-        ("periodic",),
-        {"periodicity": (0.2, 4.0), "length_scale": (0.02, 2.0)},
-        True,
-    ),
-    "periodic_plus_matern_32": KernelDefinition(
-        "periodic_plus_matern_32",
-        "Periodic + Matérn-3/2",
-        _periodic_plus_matern,
-        6,
-        "continuous",
-        ("periodic",),
-        {"periodicity": (0.2, 4.0), "length_scale": (0.02, 2.0)},
-        True,
+    "wendland_c2_ard": KernelDefinition(
+        "wendland_c2_ard", "Wendland C2 ARD", _wendland, 1, (1, 2, 3), ("compact",),
+        {"length_scale": (0.02, 2.0), "amplitude": (1e-3, 5.0)}, True,
     ),
 }
 
-CANDIDATE_SETS: dict[str, tuple[str, ...]] = {
-    "standard": tuple(KERNEL_REGISTRY),
-}
+CANDIDATE_SETS: dict[str, tuple[str, ...]] = {"standard": tuple(KERNEL_REGISTRY)}
 
 
 def registered_kernel_ids() -> tuple[str, ...]:
@@ -329,3 +145,12 @@ def candidate_ids(candidate_set: str = "standard") -> tuple[str, ...]:
         return CANDIDATE_SETS[candidate_set]
     except KeyError as exc:
         raise ValueError(f"Unknown registered candidate set: {candidate_set}") from exc
+
+
+def add_observation_noise(kernel: Any, *, initial: float, bounds: tuple[float, float], optimize: bool) -> Any:
+    """Add only a separate diagonal observation-noise term when requested."""
+
+    return kernel + WhiteKernel(
+        noise_level=initial,
+        noise_level_bounds=bounds if optimize else "fixed",
+    )

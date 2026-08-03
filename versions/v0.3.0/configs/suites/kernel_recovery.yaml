@@ -1,0 +1,27 @@
+study: kernel_recovery
+experiment_name: kernel_recovery
+fields: [gp_gaussian_ard, gp_exponential_ard, gp_spherical_ard, gp_matern_32_ard, gp_matern_52_ard, gp_rational_quadratic_ard, gp_wendland_c2_ard, gp_rotated_anisotropic, gp_axis_rescaled_anisotropic]
+methods: [krispu_adaptive]
+initial_design:
+  name: interior_maximin
+  sample_count: 5
+  boundary_margin: 0.05
+benchmark:
+  trials: 3
+  final_budget: 18
+  candidate_count: 384
+  evaluation_grid_size: 36
+  base_seed: 202603
+output:
+  mode: summary
+kernel_selection:
+  mode: automatic
+  candidate_set: standard
+  optimization:
+    restarts: 0
+  reselection:
+    minimum_points: 6
+    maximum_interval: 5
+    score_degradation_fraction: 0.10
+    bound_contact_steps: 2
+    minimum_switch_improvement: 0.05

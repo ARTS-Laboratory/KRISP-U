@@ -1,0 +1,5 @@
+name: krispu_fixed_gaussian
+method: support_adjusted_krispu
+kernel:
+  type: gaussian_ard
+  optimize_hyperparameters: false

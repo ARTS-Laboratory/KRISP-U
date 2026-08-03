@@ -8,7 +8,9 @@ from pathlib import Path
 
 import numpy as np
 
-from krispu import ContinuousDomain, KrispURecommender, ObservationSet
+from krispu.domains import ContinuousDomain
+from krispu.observations import ObservationSet
+from krispu.recommender import KrispURecommender
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -52,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         fieldnames = [
             "rank",
             *args.features,
-            "loo_field_sensitivity_at_selection",
+            "jackknife_field_sensitivity_at_selection",
             "kernel_support_deficit_at_selection",
             "krispu_uncertainty_at_selection",
             "predicted_mean",

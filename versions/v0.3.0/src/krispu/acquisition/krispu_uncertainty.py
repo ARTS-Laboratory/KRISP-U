@@ -8,6 +8,6 @@ from krispu.results import UncertaintyDiagnostics
 
 
 def krispu_uncertainty_scores(diagnostics: UncertaintyDiagnostics) -> NDArray:
-    """Return the canonical ``S_LOO * sqrt(C)`` field."""
+    """Return the canonical buffered-jackknife ``S * sqrt(C)`` field."""
 
     return diagnostics.krispu_uncertainty.copy()

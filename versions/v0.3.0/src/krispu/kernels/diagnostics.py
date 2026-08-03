@@ -80,22 +80,6 @@ def inspect_fitted_model(model: Any, definition: KernelDefinition) -> Degeneracy
                     "white-noise variance",
                 )
         penalty += float(len(reasons))
-        if definition.kernel_id in {
-            "matern_52_long_plus_matern_12_short",
-            "matern_32_long_plus_matern_12_short",
-            "matern_52_long_plus_matern_32_short",
-            "rbf_long_plus_matern_12_short",
-        }:
-            scales = _length_scale_values(values)
-            if len(scales) >= 2 and np.any(scales[1] >= scales[0]):
-                reasons.append("short scale >= long scale")
-                penalty += 10.0
-            amplitudes = [value for name, value in values.items() if "constant_value" in name]
-            if len(amplitudes) >= 2:
-                total = sum(float(np.sum(value)) for value in amplitudes)
-                if total > 0 and max(float(np.sum(value)) for value in amplitudes) / total > 0.99:
-                    reasons.append("one component absorbing nearly all variance")
-                    penalty += 5.0
         noise = [value for name, value in values.items() if "noise_level" in name]
         amplitudes = [value for name, value in values.items() if "constant_value" in name]
         if noise and amplitudes:

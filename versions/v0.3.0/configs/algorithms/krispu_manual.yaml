@@ -1,0 +1,6 @@
+name: krispu_manual
+method: support_adjusted_krispu
+kernel:
+  type: matern_32_ard
+  length_scale_initial: [0.15, 0.45]
+  optimize_hyperparameters: true

@@ -6,7 +6,7 @@ optimizer and there is no `KRISPU = KrispUOptimizer` alias.
 
 The default score is no longer posterior standard deviation, expected
 improvement, UCB/LCB, or covariance-only information gain. It is the combined
-candidate-level fixed-hyperparameter LOO uncertainty. The explicit
+candidate-level fixed-hyperparameter buffered-jackknife uncertainty. The explicit
 `posterior_std` option remains only as a named comparison baseline.
 
 The old scalar-per-removed-point interpolation method is not part of the new

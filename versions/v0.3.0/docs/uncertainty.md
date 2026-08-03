@@ -1,40 +1,37 @@
-# KRISP-U uncertainty
+# KRISP-U uncertainty fields
 
-For each eligible observation, the fixed fitted-kernel LOO model predicts the
-complete reference field. With `n` folds,
+The universal uncertainty backend is buffered jackknife. For each eligible
+anchor (i), the fold removes the anchor and all observations within its
+normalized buffer radius. Nearby noneligible observations are removed too.
+The complete-fit kernel hyperparameters remain fixed in every fold.
 
-\[
-\bar f_{LOO}(x)=\frac1n\sum_i\hat f_{-i}(x),
-\qquad
-S_{LOO}(x)=\sqrt{\frac{n-1}{n}\sum_i[\hat f_{-i}(x)-\bar f_{LOO}(x)]^2}.
-\]
+If (F_i(x)) is the reference-field prediction from fold (i), the field
+ensemble mean and sensitivity are
 
-`S_LOO` is LOO field sensitivity: it measures dependence on existing
-measurements and is not the canonical acquisition by itself.
+```text
+J(x) = mean_i F_i(x)
+S_J(x) = sqrt((m - 1)/m * sum_i (F_i(x) - J(x))^2)
+```
 
-The fitted latent-process kernel defines the support deficit. In normalized
-coordinates,
+The universal buffer radius is
 
-\[
-v_{support}(x)=k_f(x,x)-k_f(x,X)[K_f(X,X)+\Sigma]^{-1}k_f(X,x),
-\]
+```text
+clip(multiplier * median(nonzero nearest-neighbor distance),
+     minimum_radius, maximum_radius)
+```
 
-\[
-C(x)=\operatorname{clip}\left(\frac{v_{support}(x)}
-{\max(k_f(x,x),\epsilon)},0,1\right).
-\]
+All folds store their removed indices, effective radius, removed count, and
+training count in `BufferedJackknifePlan`. This makes fold construction
+reproducible and prevents pointwise deletion from hiding unsupported regions
+inside dense observation clusters.
 
-`WhiteKernel` is excluded from `k_f`; known observation variances, fitted
-white noise, and the numerical GPR diagonal are included in `Sigma`. The
-solve is performed without explicit matrix inversion, and nonfinite or badly
-conditioned covariance calculations fail clearly.
+The fitted latent-process kernel defines support deficit (C(x)). The
+canonical KRISP-U field is
 
-The canonical field is exactly
+```text
+U_KRISPU(x) = S_J(x) * sqrt(C(x))
+```
 
-\[
-U_{KRISPU}(x)=S_{LOO}(x)\sqrt{C(x)}.
-\]
-
-The default recommender maximizes `krispu_uncertainty`. `posterior_std` is a
-baseline diagnostic only. `raw_loo_sensitivity` is a diagnostic comparison
-baseline; it is not the complete uncertainty field.
+Posterior standard deviation, calibrated posterior standard deviation, and
+held-out standardized residuals remain diagnostics. None is introduced into
+the canonical product.

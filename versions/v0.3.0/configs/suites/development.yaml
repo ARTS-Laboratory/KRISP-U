@@ -1,0 +1,23 @@
+experiment_name: development
+fields: [smooth_single_scale, localized_feature, anisotropic_ridge, rough_correlated, multiscale_response, boundary_feature, baseline_drift, white_noise, baseline_plus_noise, heteroscedastic_noise, clustered_observations]
+methods: [krispu_fixed_gaussian, krispu_fixed_matern32, krispu_manual, krispu_adaptive, gp_posterior_variance, maximin, random_sequential]
+jackknife:
+  buffer:
+    mode: median_nearest_neighbor
+    multiplier: 1.0
+    minimum_radius: 0.025
+    maximum_radius: 0.20
+    minimum_training_points: 3
+initial_design:
+  name: interior_maximin
+  sample_count: 5
+  boundary_margin: 0.05
+benchmark:
+  trials: 1
+  final_budget: 20
+  candidate_count: 384
+  evaluation_grid_size: 40
+  base_seed: 202603
+  minimum_physical_spacing: 0.0001
+output:
+  mode: summary

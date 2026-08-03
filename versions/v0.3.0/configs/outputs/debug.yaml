@@ -1,0 +1,5 @@
+mode: debug
+save_spatial_arrays: true
+save_gif: true
+save_png_snapshots: true
+save_candidate_arrays: true

@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from benchmarks.evaluation import nrmse_auc, paired_difference, reconstruction_metrics
-from benchmarks.methods import lhs_order, maximin_index, random_order
+from evaluation.methods import lhs_order, maximin_index, random_order
+from evaluation.metrics import nrmse_auc, paired_difference, reconstruction_metrics
 from krispu.domains import ContinuousDomain
 
 

@@ -1,6 +1,7 @@
-# Researcher CSV workflow
+# Researcher workflow
 
-Install from `versions/v0.3.0/`, then run:
+The active package is `src/krispu`. Import reusable workflows from
+`krispu.api` or use the CSV command:
 
 ```bash
 krispu-recommend measurements.csv \
@@ -8,12 +9,24 @@ krispu-recommend measurements.csv \
   --features x y \
   --bounds x:-1:1 y:-1:1 \
   --n-recommendations 3 \
-  --output recommendation_outputs/recommendations.csv
+  --output outputs/researcher/recommendations.csv
 ```
 
-Rows with a finite target are measured observations. Rows with a blank target
-are optional user-supplied candidates. If no blank-target rows are present,
-the command generates a Latin-hypercube candidate pool inside the declared
-domain. The output contains coordinates, predicted mean, posterior standard
-deviation, jackknife uncertainty, calibrated posterior uncertainty, combined
-score, rank, and distance to the nearest measured point.
+Rows with a finite target are measured observations. Blank-target rows are
+optional user-supplied candidates. If none are supplied, the command creates a
+Latin-hypercube candidate pool inside the declared domain.
+
+For evaluation, use a YAML suite profile rather than algorithm flags:
+
+```bash
+python -m evaluation.runners.suite --config configs/suites/development.yaml
+```
+
+The runner resolves defaults, rejects unknown keys, records the resolved YAML,
+and writes to the stable overwrite-only directory
+`outputs/<experiment_name>/`. It does not expose the algorithm's hyperparameters
+through a large command-line interface.
+
+Keep active source changes in `src`, stable evaluation machinery in
+`evaluation`, and experiments that are not yet promoted in `scratch`. Never
+import scratch or generated outputs from either active source or evaluation.

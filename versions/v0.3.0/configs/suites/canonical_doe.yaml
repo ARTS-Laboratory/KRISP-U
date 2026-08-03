@@ -1,0 +1,16 @@
+study: reconstruction_performance
+experiment_name: canonical_doe
+fields: [Hartmann 3D, Hartmann 6D, Borehole, OTL circuit, Piston simulation]
+methods: [krispu_fixed_gaussian, krispu_fixed_matern32, krispu_manual, krispu_adaptive, gp_posterior_variance, maximin, random_sequential]
+initial_design:
+  name: interior_maximin
+  sample_count: 8
+  boundary_margin: 0.05
+benchmark:
+  trials: 5
+  final_budget: 35
+  candidate_count: 1024
+  evaluation_grid_size: 32
+  base_seed: 202603
+output:
+  mode: summary

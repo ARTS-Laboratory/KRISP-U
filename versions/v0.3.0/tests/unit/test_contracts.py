@@ -1,15 +1,11 @@
 import numpy as np
 import pytest
 
-from krispu import (
-    ContinuousDomain,
-    GPRConfig,
-    MixedDomain,
-    ObservationSet,
-    PolygonDomain,
-    ResponseStandardizer,
-)
 from krispu.candidates import valid_candidate_mask
+from krispu.config import GPRConfig
+from krispu.domains import ContinuousDomain, MixedDomain, PolygonDomain
+from krispu.observations import ObservationSet
+from krispu.surrogates import ResponseStandardizer
 
 
 def test_coordinate_normalization_uses_declared_domain_bounds() -> None:
@@ -19,13 +15,13 @@ def test_coordinate_normalization_uses_declared_domain_bounds() -> None:
     assert np.allclose(domain.denormalize(domain.normalize(point)), point)
 
 
-def test_observation_contract_requires_explicitly_valid_loo_mask() -> None:
+def test_observation_contract_requires_explicitly_valid_jackknife_mask() -> None:
     with pytest.raises(ValueError, match="one Boolean"):
-        ObservationSet([[0, 0], [1, 1]], [0, 1], loo_eligible=[True])
+        ObservationSet([[0, 0], [1, 1]], [0, 1], jackknife_eligible=[True])
     observations = ObservationSet(
-        [[0, 0], [1, 1], [0, 1]], [0, 1, 2], loo_eligible=[True, False, True]
+        [[0, 0], [1, 1], [0, 1]], [0, 1, 2], jackknife_eligible=np.array([True, False, True])
     )
-    assert np.array_equal(observations.loo_eligible_indices, [0, 2])
+    assert np.array_equal(observations.jackknife_eligible_indices, [0, 2])
     assert np.array_equal(observations.protected_indices, [1])
 
 

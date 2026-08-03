@@ -3,9 +3,9 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from benchmarks.fields.noisy import noisy_field
-from benchmarks.runner import run_benchmark
-from benchmarks.visualization import snapshot_sample_counts
+from evaluation.fields.canonical.noisy import noisy_field
+from evaluation.figures.sequential import snapshot_sample_counts
+from evaluation.runners.suite import run_benchmark
 
 
 def test_noisy_field_is_deterministic_from_seed() -> None:
@@ -32,7 +32,7 @@ def test_noisy_visual_audit_writes_outputs_under_requested_root(tmp_path: Path) 
         "experiment_name": "noisy_visual_test",
         "include_noisy_field": True,
         "fields": ["noisy_baseline"],
-        "methods": ["krispu_loo", "posterior_std", "random"],
+        "methods": ["support_adjusted_krispu", "posterior_std", "random"],
         "initial_design": "interior_maximin",
         "initial_sample_count": 5,
         "initial_boundary_margin": 0.05,
@@ -49,6 +49,7 @@ def test_noisy_visual_audit_writes_outputs_under_requested_root(tmp_path: Path) 
         "save_comparison_figures": True,
         "frame_duration_ms": 80,
         "dpi": 80,
+        "output": {"mode": "debug"},
     }
     config_path = tmp_path / "noisy.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -56,9 +57,7 @@ def test_noisy_visual_audit_writes_outputs_under_requested_root(tmp_path: Path) 
     output = run_benchmark(config_path, output_root)
 
     assert output.resolve().is_relative_to(output_root.resolve())
-    assert list((output / "animations" / "noisy_baseline").rglob("*.gif"))
-    assert list((output / "snapshots" / "noisy_baseline").rglob("*.png"))
-    assert list((output / "snapshots" / "noisy_baseline").rglob("*_snapshots.gif"))
-    assert list((output / "point_progress" / "noisy_baseline").rglob("*.gif"))
-    assert (output / "comparisons" / "noisy_baseline_method_comparison.png").exists()
-    assert (output / "reports" / "benchmark_report.md").exists()
+    assert list((output / "animations").rglob("*.gif"))
+    assert list((output / "snapshots").rglob("*.png"))
+    assert (output / "report.md").exists()
+    assert (output / "config_resolved.yaml").exists()

@@ -15,6 +15,7 @@ dependencies = [
     "scipy>=1.10",
     "scikit-learn>=1.2",
     "PyYAML>=6.0",
+    "tqdm>=4.66",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +31,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = ["ignore::sklearn.exceptions.ConvergenceWarning"]
 
 [tool.black]
 line-length = 100

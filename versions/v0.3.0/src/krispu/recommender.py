@@ -9,18 +9,20 @@ from numpy.typing import ArrayLike, NDArray
 
 from krispu.acquisition.krispu_uncertainty import krispu_uncertainty_scores
 from krispu.acquisition.posterior_std import posterior_std_scores
-from krispu.acquisition.raw_loo_sensitivity import raw_loo_sensitivity_scores
+from krispu.acquisition.raw_jackknife_sensitivity import raw_jackknife_sensitivity_scores
 from krispu.candidates import generate_candidates, nearest_normalized_distance, valid_candidate_mask
 from krispu.config import GPRConfig
 from krispu.domains import CandidateDomain
+from krispu.jackknife import (
+    BufferedJackknifePlan,
+    build_buffered_jackknife_plan,
+    jackknife_calibration_factor,
+    jackknife_field_sensitivity,
+)
 from krispu.observations import ObservationSet
 from krispu.results import Recommendation, RecommendationResult, UncertaintyDiagnostics
 from krispu.surrogates.gpr import GPRSurrogate
-from krispu.uncertainty.jackknife import (
-    loo_calibration_factor,
-    loo_field_sensitivity,
-)
-from krispu.uncertainty.loo_bruteforce import compute_bruteforce_loo
+from krispu.uncertainty.buffered_jackknife import compute_buffered_jackknife
 from krispu.uncertainty.support import kernel_support_deficit
 
 
@@ -46,18 +48,14 @@ class KrispURecommender:
             | None
         ) = None,
     ) -> None:
-        uncertainty = {
-            "loo_uncertainty": "support_adjusted_krispu",
-            "krispu_loo": "support_adjusted_krispu",
-        }.get(uncertainty, uncertainty)
         if uncertainty not in {
             "support_adjusted_krispu",
-            "raw_loo_sensitivity",
+            "raw_jackknife_sensitivity",
             "posterior_std",
         }:
             raise ValueError(
                 "uncertainty must be 'support_adjusted_krispu', "
-                "'raw_loo_sensitivity', or 'posterior_std'."
+                "'raw_jackknife_sensitivity', or 'posterior_std'."
             )
         if n_candidates <= 0:
             raise ValueError("n_candidates must be positive.")
@@ -77,8 +75,9 @@ class KrispURecommender:
         self,
         observations: ObservationSet,
         reference_points: ArrayLike,
+        buffered_jackknife_plan: BufferedJackknifePlan | None = None,
     ) -> UncertaintyDiagnostics:
-        """Compute all full-fit and candidate-level LOO quantities."""
+        """Compute the complete fit and all buffered-jackknife quantities."""
 
         self._validate_observations(observations)
         reference = self.domain.validate_points(reference_points, "reference_points")
@@ -91,14 +90,24 @@ class KrispURecommender:
         )
         self.surrogate_ = surrogate
         predicted_mean, posterior_std = surrogate.predict(reference_normalized)
-        loo = compute_bruteforce_loo(
+        plan_config = self.gpr_config.jackknife
+        plan = buffered_jackknife_plan or build_buffered_jackknife_plan(
+            X_normalized,
+            observations.jackknife_eligible,
+            multiplier=plan_config.multiplier,
+            minimum_radius=plan_config.minimum_radius,
+            maximum_radius=plan_config.maximum_radius,
+            minimum_training_points=plan_config.minimum_training_points,
+        )
+        jackknife = compute_buffered_jackknife(
             surrogate,
             observations,
             reference_normalized,
+            plan,
             X_normalized=X_normalized,
             epsilon=self.gpr_config.response_epsilon,
         )
-        loo_mean, sensitivity = loo_field_sensitivity(loo.field_means)
+        jackknife_mean, sensitivity = jackknife_field_sensitivity(jackknife.field_means)
         support_deficit, maximum_kernel_correlation = kernel_support_deficit(
             surrogate,
             X_normalized,
@@ -107,19 +116,19 @@ class KrispURecommender:
         )
         krispu_uncertainty = sensitivity * np.sqrt(support_deficit)
         dominant_columns = np.argmax(
-            (loo.field_means - loo_mean[:, None]) ** 2,
+            (jackknife.field_means - jackknife_mean[:, None]) ** 2,
             axis=1,
         )
-        dominant_indices = loo.loo_eligible_indices[dominant_columns]
+        dominant_indices = jackknife.anchor_indices[dominant_columns]
         dominant_coordinates = observations.X[dominant_indices].copy()
-        calibration = loo_calibration_factor(loo.standardized_residuals)
+        calibration = jackknife_calibration_factor(jackknife.standardized_residuals)
         calibrated = calibration * np.maximum(posterior_std, 0.0)
         combined = krispu_uncertainty.copy()
         if not np.all(np.isfinite(predicted_mean)):
             raise FloatingPointError("predicted means are non-finite.")
         for name, value in (
             ("posterior standard deviations", posterior_std),
-            ("LOO field sensitivities", sensitivity),
+            ("jackknife field sensitivities", sensitivity),
             ("kernel support deficits", support_deficit),
             ("KRISP-U uncertainties", krispu_uncertainty),
             ("maximum kernel correlations", maximum_kernel_correlation),
@@ -128,31 +137,32 @@ class KrispURecommender:
         ):
             if not np.all(np.isfinite(value)) or np.any(value < 0):
                 raise FloatingPointError(f"{name} are non-finite or negative.")
-        if not np.all(np.isfinite(loo_mean)):
-            raise FloatingPointError("LOO means are non-finite.")
+        if not np.all(np.isfinite(jackknife_mean)):
+            raise FloatingPointError("jackknife means are non-finite.")
         if not np.isfinite(calibration) or calibration < 0:
-            raise FloatingPointError("LOO calibration factor is non-finite or negative.")
+            raise FloatingPointError("jackknife calibration factor is non-finite or negative.")
         return UncertaintyDiagnostics(
             reference_points=reference.copy(),
             predicted_mean=predicted_mean,
             posterior_std=posterior_std,
-            loo_mean=loo_mean,
-            loo_field_sensitivity=sensitivity,
+            jackknife_mean=jackknife_mean,
+            jackknife_field_sensitivity=sensitivity,
             kernel_support_deficit=support_deficit,
             krispu_uncertainty=krispu_uncertainty,
             maximum_kernel_correlation_to_observations=maximum_kernel_correlation,
-            loo_calibration_factor=calibration,
+            jackknife_calibration_factor=calibration,
             calibrated_posterior_std=calibrated,
             combined_std=combined,
-            loo_field_means=loo.field_means,
-            loo_field_stds=loo.field_stds,
-            loo_residuals=loo.residuals,
-            loo_standardized_residuals=loo.standardized_residuals,
-            loo_eligible_indices=loo.loo_eligible_indices,
-            dominant_loo_observation_indices=dominant_indices,
-            dominant_loo_observation_coordinates=dominant_coordinates,
-            heldout_predicted_mean=loo.heldout_means,
-            heldout_predicted_std=loo.heldout_stds,
+            jackknife_field_means=jackknife.field_means,
+            jackknife_field_stds=jackknife.field_stds,
+            jackknife_residuals=jackknife.residuals,
+            jackknife_standardized_residuals=jackknife.standardized_residuals,
+            jackknife_eligible_indices=jackknife.anchor_indices,
+            dominant_jackknife_observation_indices=dominant_indices,
+            dominant_jackknife_observation_coordinates=dominant_coordinates,
+            heldout_predicted_mean=jackknife.heldout_means,
+            heldout_predicted_std=jackknife.heldout_stds,
+            buffered_jackknife_plan=plan,
         )
 
     def recommend(
@@ -199,8 +209,8 @@ class KrispURecommender:
             krispu_uncertainty_scores(diagnostics)
             if self.uncertainty == "support_adjusted_krispu"
             else (
-                raw_loo_sensitivity_scores(diagnostics)
-                if self.uncertainty == "raw_loo_sensitivity"
+                raw_jackknife_sensitivity_scores(diagnostics)
+                if self.uncertainty == "raw_jackknife_sensitivity"
                 else posterior_std_scores(diagnostics)
             )
         )
@@ -222,7 +232,7 @@ class KrispURecommender:
                 acquisition_score=float(scores[index]),
                 predicted_mean=float(diagnostics.predicted_mean[index]),
                 posterior_std=float(diagnostics.posterior_std[index]),
-                loo_field_sensitivity=float(diagnostics.loo_field_sensitivity[index]),
+                jackknife_field_sensitivity=float(diagnostics.jackknife_field_sensitivity[index]),
                 kernel_support_deficit=float(diagnostics.kernel_support_deficit[index]),
                 krispu_uncertainty=float(diagnostics.krispu_uncertainty[index]),
                 nearest_normalized_distance=float(distances[index]),

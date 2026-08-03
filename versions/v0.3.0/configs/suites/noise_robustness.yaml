@@ -1,0 +1,16 @@
+study: reconstruction_performance
+experiment_name: noise_robustness
+fields: [smooth_single_scale, white_noise, baseline_drift, baseline_plus_noise, heteroscedastic_noise]
+methods: [krispu_fixed_gaussian, krispu_fixed_matern32, krispu_manual, krispu_adaptive, gp_posterior_variance, maximin, random_sequential]
+initial_design:
+  name: interior_maximin
+  sample_count: 5
+  boundary_margin: 0.05
+benchmark:
+  trials: 5
+  final_budget: 25
+  candidate_count: 512
+  evaluation_grid_size: 40
+  base_seed: 202603
+output:
+  mode: summary

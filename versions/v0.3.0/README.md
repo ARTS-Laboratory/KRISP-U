@@ -1,15 +1,8 @@
 # KRISP-U v0.3.0
 
-This version implements KRISP-U as a field-reconstruction method.  It fits a
-response-standardized Matérn-3/2 ARD Gaussian process, removes each explicitly
-eligible measurement using the same fitted kernel hyperparameters, predicts
-the complete candidate/reference field for every fold, and ranks candidates by
-support-adjusted KRISP-U uncertainty.
-
-The first pass intentionally uses the auditable brute-force LOO core. Analytic
-LOO, conditional batch selection, and broad random-field generation remain
-deferred. The deterministic benchmark audit below is diagnostic rather than
-final performance evidence.
+KRISP-U reconstructs a response field with a response-standardized Matérn
+Gaussian process and ranks candidate measurements with support-adjusted buffered-jackknife
+uncertainty. The numerical core is the reusable code in `src/krispu`.
 
 Install from this directory:
 
@@ -17,45 +10,68 @@ Install from this directory:
 python -m pip install -e ".[dev,plot]"
 ```
 
-Minimal use:
+On Windows, the setup script creates or repairs the local virtual environment:
+
+```powershell
+.\setup.ps1
+```
+
+User-facing workflows are intentionally small:
 
 ```python
 import numpy as np
-from krispu import ContinuousDomain, KrispURecommender, ObservationSet
+
+from krispu.api import recommend_next_point
+from krispu.domains import ContinuousDomain
+from krispu.observations import ObservationSet
 
 domain = ContinuousDomain([[-1, 1], [-1, 1]], names=["x", "y"])
 observations = ObservationSet(
     X=np.array([[-1, -1], [1, -1], [-1, 1], [1, 1]]),
     y=np.array([0.0, 1.0, 1.0, 0.0]),
 )
-result = KrispURecommender(domain, random_state=7).recommend(observations)
+result = recommend_next_point(domain, observations)
 print(result.recommendations[0].x)
 ```
 
-See `docs/algorithm.md` and `docs/uncertainty.md` for the exact method.
+The active algorithm source is only `src/krispu`. Stable benchmark fields,
+methods, runners, metrics, figures, and reports live under `evaluation` and
+may import `krispu`; the algorithm source never imports `evaluation`,
+`benchmarks`, `scratch`, or `outputs`. `scratch` is disposable: useful work
+must be promoted into `src`, `evaluation`, or `tests`.
 
-Benchmark audit
----------------
-
-From this directory, install the plotting and development dependencies and run
-the paired smoke audit:
-
-```bash
-python -m pip install -e ".[dev,plot]"
-python -m benchmarks.runner --config benchmarks/configs/paired_smoke.yaml
-```
-
-The larger visual audit is run with:
+Run a reproducible suite with one minimal command:
 
 ```bash
-python -m benchmarks.runner --config benchmarks/configs/visual_audit.yaml
+python -m evaluation.runners.suite --config configs/suites/development.yaml
 ```
 
-Outputs are written only to `benchmark_outputs/<timestamp>_<experiment>/`.
-The audit uses smooth, localized, anisotropic, rough-correlated, and
-rough-multiscale fields; the methods `raw_loo_sensitivity`,
-`support_adjusted_krispu`, `posterior_std`, `random`, `lhs`, and `maximin`; and the common
-five-point interior maximin initial design.
-Metrics are RMSE, NRMSE, MAE, NMAE, R², p95 absolute error, and maximum
-absolute error. Every paired method shares the field, initial responses,
-candidate pool, evaluation grid, and budget, with separate recorded seeds.
+Run every Pass 3 suite in order with:
+
+```bash
+python -m evaluation.runners.run_all_suites
+```
+
+From the repository root, use:
+
+```powershell
+python .\versions\v0.3.0\run_all.py
+```
+
+The wrapper writes each suite under `outputs/<suite_name>/` and updates
+`outputs/all_suites_manifest.yaml` after every suite. Use `--fail-fast` to stop
+on the first failure or repeat `--suite NAME` to run a selected subset.
+
+YAML profiles are validated before execution. Unknown keys are errors, and the
+resolved profile is saved as `outputs/development/config_resolved.yaml`.
+Outputs are overwrite-only at `outputs/<suite_name>/`; rerunning a suite
+replaces that exact suite directory and never creates timestamped run folders.
+
+The default `summary` profile writes scalar tables, kernel tables, the four
+official field figures, the four official global figures, a manifest, and a
+report. `diagnostic` adds checkpoint arrays and complete candidate-score
+tables. `debug` additionally retains intermediate arrays and animation frames;
+temporary frames are removed after GIF construction in other modes.
+
+See `docs/architecture.md`, `docs/researcher_workflow.md`, and
+`docs/output_schema.md` for the source/evaluation boundary and output schema.

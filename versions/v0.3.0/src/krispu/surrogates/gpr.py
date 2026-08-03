@@ -2,7 +2,7 @@
 
 The public ``GPRSurrogate`` works in normalized coordinates and reports
 predictions in the original response units.  A fitted kernel is deliberately
-reused without re-optimization by the LOO backend.
+reused without re-optimization inside buffered jackknife folds.
 """
 
 from __future__ import annotations
@@ -14,14 +14,14 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from sklearn.base import clone
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import ConstantKernel, Matern, WhiteKernel
+from sklearn.gaussian_process.kernels import WhiteKernel
 
 from krispu.config import GPRConfig
 
 
 @dataclass(frozen=True)
 class ResponseStandardizer:
-    """Affine response transform used by both full and LOO models."""
+    """Affine response transform used by full and buffered-fold models."""
 
     mean: float
     scale: float
@@ -107,8 +107,9 @@ class GPRSurrogate:
     ) -> GPRSurrogate:
         """Fit a fold with fixed full-model hyperparameters.
 
-        ``standardizer`` and ``frozen_kernel`` must come from the complete
-        observation fit when this method is used for LOO.
+        ``frozen_kernel`` comes from the complete observation fit for buffered
+        jackknife folds. If ``standardizer`` is omitted, it is fit from the
+        fold training responses so held-out responses cannot leak into scaling.
         """
 
         points = _validate_X(X)
@@ -159,21 +160,25 @@ class GPRSurrogate:
 
     def _initial_kernel(self, dimension: int) -> Any:
         if self.config.kernel is not None:
-            return clone(self.config.kernel)
-        length_scale = np.full(dimension, self.config.length_scale_initial, dtype=float)
-        length_bounds = self.config.length_scale_bounds
-        base = Matern(length_scale=length_scale, length_scale_bounds=length_bounds, nu=1.5)
-        kernel: Any = (
-            ConstantKernel(
-                self.config.constant_value_initial,
-                constant_value_bounds=self.config.constant_value_bounds,
+            kernel = clone(self.config.kernel)
+        else:
+            from krispu.kernels.registry import get_kernel_definition
+
+            kernel = get_kernel_definition("matern_32_ard").builder(
+                dimension, self.config.optimize_hyperparameters
             )
-            * base
-        )
-        if self.config.noise_mode == "noisy" and self.config.fit_white_noise:
+        if (
+            self.config.noise_mode == "noisy"
+            and self.config.fit_white_noise
+            and not _contains_white_noise(kernel)
+        ):
             kernel = kernel + WhiteKernel(
                 noise_level=self.config.white_noise_initial,
-                noise_level_bounds=self.config.white_noise_bounds,
+                noise_level_bounds=(
+                    self.config.white_noise_bounds
+                    if self.config.optimize_hyperparameters
+                    else "fixed"
+                ),
             )
         return kernel
 
@@ -222,3 +227,13 @@ def _validate_X(X: ArrayLike) -> NDArray[np.float64]:
     if points.ndim != 2 or points.shape[1] == 0 or not np.all(np.isfinite(points)):
         raise ValueError("X must be a finite two-dimensional array.")
     return points
+
+
+def _contains_white_noise(kernel: Any) -> bool:
+    if isinstance(kernel, WhiteKernel):
+        return True
+    return any(_contains_white_noise(value) for value in getattr(kernel, "kernels", ())) or any(
+        _contains_white_noise(value)
+        for value in (getattr(kernel, "k1", None), getattr(kernel, "k2", None), getattr(kernel, "kernel", None))
+        if value is not None
+    )

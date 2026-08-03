@@ -1,0 +1,4 @@
+mode: diagnostic
+save_spatial_arrays: true
+save_gif: true
+save_png_snapshots: true

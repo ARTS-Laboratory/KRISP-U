@@ -1,61 +1,87 @@
-# Kernel selection in v0.3.0
+# Global anisotropic kernel selection
 
-Kernel selection changes only the reconstruction model used to generate the
-LOO fields. The canonical KRISP-U acquisition remains support-adjusted
-KRISP-U uncertainty; no posterior standard deviation is added to that score.
-
-## Modes and registry
-
-`manual` parses the explicit YAML schema in `krispu.kernels.builders` and
-preserves the requested family. Bounds are normalized-coordinate bounds.
-`optimize_hyperparameters: false` sets all manually supplied kernel bounds to
-`fixed` and disables the GPR optimizer. `automatic` uses the finite registry in
-`krispu.kernels.registry`; it does not build arbitrary expression trees.
-`hybrid` restricts that registry using a named profile in
-`krispu.kernels.profiles`.
-
-The initial registry is deliberately small: five single-scale, four
-long-plus-short multiscale, two trend, and two periodic candidates. The
-multiscale builders place the long component first with bounds `[0.15, 2.0]`
-and the short component second with bounds `[0.01, 0.20]`. A fitted candidate
-is penalized when the short scale is not smaller than the long scale.
-
-## Predictive scores
-
-For every candidate, a full observation fit is optimized once. Each LOO or
-spatial-block fold then clones that fitted kernel with `optimizer=None`; fold
-hyperparameters are never re-optimized. With held-out residual `e_i` and
-predictive standard deviation `s_i`, the reported metrics are
+At every sample count there is exactly one selected spatial covariance family
+and one global ARD vector. The active standard registry is:
 
 ```text
-NRMSE = sqrt(mean(e_i^2)) / (max(y) - min(y))
-NLPD  = mean(0.5*log(2*pi*s_i^2) + e_i^2/(2*s_i^2))
-calibration error = abs(mean((e_i/s_i)^2) - 1)
+gaussian_ard
+exponential_ard
+spherical_ard
+matern_32_ard
+matern_52_ard
+rational_quadratic_ard
+wendland_c2_ard
 ```
 
-`loo_predictive` uses the LOO metrics. `spatial_block_cv` uses deterministic
-occupied quadrants for two-dimensional normalized coordinates and falls back
-to LOO when fewer than four observations or fewer than two occupied blocks
-are available. `spatial_cv_composite` is the default. It min-max normalizes
-each spatial-CV metric across the valid candidate set and minimizes
+Gaussian is the displayed replacement for RBF, and exponential is the
+displayed replacement for Matérn-1/2. They are not scored as duplicate aliases.
+The rational-quadratic family uses a scalar shape parameter plus a genuine
+per-axis ARD scale vector. Spherical and Wendland C2 are restricted to the
+dimensions in which their covariance formulations are positive definite.
+
+An observation-noise nugget may be added as a separate diagonal noise
+parameter. It is not a second spatial covariance component. Additive and
+multiplicative manual kernel specifications are rejected.
+
+The removed composite families are:
 
 ```text
-0.5 * normalized spatial NLPD
-+ 0.4 * normalized spatial NRMSE
-+ 0.1 * normalized calibration error
-+ degeneracy penalty
+matern_52_long_plus_matern_12_short
+matern_32_long_plus_matern_12_short
+matern_52_long_plus_matern_32_short
+rbf_long_plus_matern_12_short
+linear_plus_matern_32
+linear_plus_matern_52
+periodic_times_matern_32
+periodic_plus_matern_32
 ```
 
-Marginal likelihood is recorded for comparison but is never the sole default
-selection criterion. Candidate failures and spatial-CV fallback are recorded
-in `kernel_candidate_scores.csv`.
+## Optimization and reselection
 
-## Hysteresis and benchmark studies
+`kernel.optimization.every_step: true` optimizes the current family at every
+step after the minimum fit size. `kernel.optimization.restarts` controls
+optimizer restarts. Reselection is triggered by the small configured set of
+fit, validation, conditioning, bound-contact, degradation, and interval
+conditions. A triggered check scores every permitted family using one shared
+buffered-jackknife plan.
 
-The deterministic profile default is used below six observations. Candidates
-are reevaluated every three new measurements by default, and a challenger
-must improve the lower-is-better score by at least `0.05` to replace the
-current family. Study A compares complete workflows. Study B replays the
-selected family at each sample count across `raw_loo_sensitivity`,
-`support_adjusted_krispu`, posterior standard deviation, random, LHS, and
-maximin to isolate acquisition behavior.
+The primary score is buffered predictive log score. Upper-tail normalized
+absolute error is the tie-breaker. The current family may be retained when a
+challenger does not exceed `minimum_switch_improvement`.
+
+## YAML
+
+```yaml
+jackknife:
+  buffer:
+    mode: median_nearest_neighbor
+    multiplier: 1.0
+    minimum_radius: 0.025
+    maximum_radius: 0.20
+    minimum_training_points: 3
+
+kernel:
+  optimization:
+    every_step: true
+    restarts: 2
+  reselection:
+    minimum_points: 6
+    maximum_interval: 5
+    score_degradation_fraction: 0.10
+    bound_proximity_fraction: 0.05
+    bound_contact_steps: 2
+    minimum_switch_improvement: 0.05
+```
+
+Every event records whether hyperparameters were optimized, whether
+reselection was triggered, its reasons, candidates evaluated, previous and
+selected family IDs, current and challenger scores, score improvement,
+per-axis current/minimum/maximum scales, and runtimes. The explicit records
+are `KernelOptimizationEvent`, `KernelReselectionEvent`, and
+`KernelSwitchEvent`.
+
+The public diagnostic renames are `jackknife_eligible`,
+`jackknife_field_sensitivity`, `jackknife_field_means`,
+`jackknife_residuals`, `jackknife_standardized_residuals`, and
+`BufferedJackknifeResult`. The former pointwise-deletion names are not active
+v0.3.0 API fields.

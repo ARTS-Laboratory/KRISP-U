@@ -1,0 +1,46 @@
+study: kernel_recovery
+experiment_name: kernel_recovery
+fields:
+- gp_rotated_anisotropic
+- gp_axis_rescaled_anisotropic
+methods:
+- krispu_adaptive
+initial_design: interior_maximin
+benchmark:
+  trials: 3
+  final_budget: 18
+  candidate_count: 384
+  evaluation_grid_size: 36
+  base_seed: 202603
+output:
+  mode: summary
+kernel_selection:
+  mode: automatic
+  candidate_set: standard
+  optimization:
+    restarts: 0
+  reselection:
+    minimum_points: 6
+    maximum_interval: 5
+    score_degradation_fraction: 0.1
+    bound_contact_steps: 2
+    minimum_switch_improvement: 0.05
+initial_sample_count: 5
+initial_boundary_margin: 0.05
+trials: 3
+final_budget: 18
+candidate_count: 384
+evaluation_grid_size: 36
+base_seed: 202603
+candidate_validity: {}
+jackknife:
+  buffer:
+    mode: median_nearest_neighbor
+    multiplier: 1.0
+    minimum_radius: 0.025
+    maximum_radius: 0.2
+    minimum_training_points: 3
+save_contact_sheet: false
+final_frame_duration_ms: 1500
+save_png_snapshots: false
+save_gifs: false

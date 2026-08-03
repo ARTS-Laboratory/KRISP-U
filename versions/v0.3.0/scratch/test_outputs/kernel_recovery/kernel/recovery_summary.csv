@@ -1,0 +1,7 @@
+field,trial,true_family,recovered_family,family_recovered,length_scale_relative_error,scale_bound_contact_rate,reselection_count,accepted_switch_count,sample_count_at_final_switch,buffered_validation_score
+gp_rotated_anisotropic,0,matern_32_ard,gaussian_ard,False,0.5667419994365066,0.2857142857142857,9,3,15,0.9095320423904665
+gp_rotated_anisotropic,1,matern_32_ard,gaussian_ard,False,0.5744612296741214,0.6428571428571429,4,1,15,1.2007971265800554
+gp_rotated_anisotropic,2,matern_32_ard,matern_32_ard,True,0.5779848969298612,0.5,6,0,,1.3735655260131852
+gp_axis_rescaled_anisotropic,0,gaussian_ard,gaussian_ard,True,0.4039024285318537,0.07142857142857142,2,1,13,2.439053313273318
+gp_axis_rescaled_anisotropic,1,gaussian_ard,matern_32_ard,False,0.6251472540354808,0.0,5,0,,1.1993862624713434
+gp_axis_rescaled_anisotropic,2,gaussian_ard,exponential_ard,False,0.7220054077089484,0.2857142857142857,4,1,9,1.6833215567415616

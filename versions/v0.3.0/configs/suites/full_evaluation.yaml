@@ -1,0 +1,16 @@
+study: reconstruction_performance
+experiment_name: full_evaluation
+fields: [smooth_single_scale, localized_feature, anisotropic_ridge, rough_correlated, multiscale_response, boundary_feature, baseline_drift, white_noise, baseline_plus_noise, heteroscedastic_noise, Franke, Branin-Hoo, Goldstein-Price, Six-hump camel, Hartmann 3D, Hartmann 6D, Borehole, OTL circuit, Piston simulation]
+methods: [krispu_fixed_gaussian, krispu_fixed_matern32, krispu_manual, krispu_adaptive, gp_posterior_variance, maximin, random_sequential]
+initial_design:
+  name: interior_maximin
+  sample_count: 5
+  boundary_margin: 0.05
+benchmark:
+  trials: 5
+  final_budget: 30
+  candidate_count: 1024
+  evaluation_grid_size: 48
+  base_seed: 202603
+output:
+  mode: summary

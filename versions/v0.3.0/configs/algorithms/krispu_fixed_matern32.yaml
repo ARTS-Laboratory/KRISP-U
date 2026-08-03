@@ -1,0 +1,5 @@
+name: krispu_fixed_matern32
+method: support_adjusted_krispu
+kernel:
+  type: matern_32_ard
+  optimize_hyperparameters: false

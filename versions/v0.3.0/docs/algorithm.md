@@ -1,35 +1,47 @@
-# v0.3.0 algorithm
+# KRISP-U v0.3.0 algorithm
 
-Let `X` and `R` be measured and reference coordinates. Continuous coordinates
-are normalized with the declared domain bounds:
+KRISP-U uses one global spatial covariance family and one globally shared
+anisotropic length-scale vector at each sampling step. Coordinates are
+normalized to the domain before fitting, distance calculations, buffering, or
+kernel evaluation.
 
-\[
-x'_j = (x_j-l_j)/(u_j-l_j).
-\]
+The canonical acquisition field is
 
-The same transform is used for observations, candidates, references, and all
-kernel distances. Discrete coordinates are validated against their finite
-option sets; candidate generation never optimizes through an invalid option.
+```text
+buffered-jackknife field sensitivity × sqrt(kernel support deficit)
+```
 
-Responses use the affine transform `y'=(y-y_mean)/s_y`, where `s_y=1` for a
-constant response. Predictions and standard deviations are returned in
-response units.
+Posterior standard deviation is retained as an evaluation diagnostic and
+comparator. It is not multiplied into, calibrated into, or otherwise combined
+with the canonical acquisition field.
 
-The surrogate is `ConstantKernel × Matérn-3/2 ARD`, with one length scale per
-coordinate. Length scales are bounded to `[0.02, 2.0]` in normalized
-coordinates by default. A small fixed `alpha` is used in deterministic mode;
-no freely fitted white-noise term is added in that mode.
+## Sequential step
 
-The complete fit optimizes hyperparameters once. Every eligible LOO fold uses a
-clone of the fitted kernel with `optimizer=None`, so differences between folds
-represent the influence of removing a measurement rather than a new
-kernel-selection decision. Protected observations remain in every fold.
+After the minimum fit size is reached, the selected family is optimized at
+every step. Optimization warm-starts from the previous fit and updates the
+amplitude, every axis of the global ARD scale vector, and the optional
+observation-noise nugget. The complete observation fit is the only fit that
+optimizes hyperparameters.
 
-The brute-force implementation stores the complete matrix
-`F_LOO.shape == (n_reference, n_loo)`. It never attaches one scalar to each
-removed point or interpolates those scalars into an acquisition field.
+A deterministic `BufferedJackknifePlan` is then constructed once from the
+normalized observations. Each eligible anchor removes itself and every
+observation inside the global adaptive buffer, including observations that are
+not eligible anchors. If that removes too many points, the radius is reduced
+deterministically for that fold until `minimum_training_points` is met. The
+effective radius is recorded. The same plan is used for every candidate family
+at that sample count.
 
-The default recommendation is the valid candidate maximizing KRISP-U
-uncertainty. Candidate distance is only a small duplicate/near-duplicate
-validity floor (`1e-4` in normalized coordinates); it is not an acquisition
-score.
+Each fold reuses the complete-fit kernel parameters, refits only the GP linear
+algebra and response standardization, predicts the complete reference field,
+and predicts the held-out anchor. The ensemble of fold field predictions gives
+the buffered-jackknife field sensitivity. Kernel support is computed from the
+selected complete-fit latent covariance, excluding the separate noise term.
+
+Family reselection is triggered only by the configured first eligible check,
+fit or validation failure, conditioning failure, repeated bound contact,
+material score degradation, or the maximum check interval. When triggered,
+all permitted families are optimized on the complete data and scored with the
+same buffered plan. Buffered predictive log score is primary; upper-tail
+normalized absolute error is the tie-breaker. A candidate switch is accepted
+only when its relative improvement reaches the configured threshold. A check
+that retains the current family is still recorded as a reselection event.

@@ -1,0 +1,35 @@
+experiment_name: paired_smoke
+include_noisy_field: true
+fields:
+  - smooth
+  - localized
+  - anisotropic
+  - rough_correlated
+  - rough_multiscale
+methods:
+  - raw_jackknife_sensitivity
+  - support_adjusted_krispu
+  - posterior_std
+  - random
+  - lhs
+  - maximin
+initial_design: interior_maximin
+initial_sample_count: 5
+initial_boundary_margin: 0.05
+candidate_validity:
+  minimum_normalized_distance: 1.0e-4
+final_budget: 12
+candidate_count: 256
+evaluation_grid_size: 35
+trials: 5
+base_seed: 123
+save_gifs: true
+save_png_snapshots: true
+save_snapshot_gifs: true
+snapshot_every: 1
+frame_duration_ms: 350
+dpi: 120
+annotate_point_order: true
+save_point_layout_animations: true
+save_comparison_figures: true
+save_pdf: false

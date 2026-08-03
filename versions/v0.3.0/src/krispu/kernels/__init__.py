@@ -1,6 +1,7 @@
 """Explicit kernel construction, registry, scoring, and selection."""
 
 from krispu.kernels.builders import build_kernel_from_spec
+from krispu.kernels.events import KernelOptimizationEvent, KernelReselectionEvent, KernelSwitchEvent
 from krispu.kernels.profiles import PROFILE_REGISTRY, get_profile
 from krispu.kernels.registry import (
     KERNEL_REGISTRY,
@@ -12,7 +13,6 @@ from krispu.kernels.registry import (
 from krispu.kernels.scoring import (
     CandidateScore,
     score_candidate_set,
-    spatial_block_folds,
 )
 from krispu.kernels.selection import (
     KernelSelectionResult,
@@ -29,9 +29,12 @@ __all__ = [
     "PROFILE_REGISTRY",
     "CandidateScore",
     "KernelDefinition",
+    "KernelOptimizationEvent",
+    "KernelReselectionEvent",
     "KernelSelectionConfig",
     "KernelSelectionResult",
     "KernelSelector",
+    "KernelSwitchEvent",
     "build_kernel_from_spec",
     "candidate_ids",
     "get_kernel_definition",
@@ -40,5 +43,4 @@ __all__ = [
     "registered_kernel_ids",
     "score_candidate_set",
     "select_kernel",
-    "spatial_block_folds",
 ]

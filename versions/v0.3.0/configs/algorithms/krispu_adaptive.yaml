@@ -1,0 +1,13 @@
+name: krispu_adaptive
+method: support_adjusted_krispu
+kernel_selection:
+  mode: automatic
+  candidate_set: standard
+  optimization:
+    restarts: 0
+  reselection:
+    minimum_points: 6
+    maximum_interval: 5
+    score_degradation_fraction: 0.10
+    bound_contact_steps: 2
+    minimum_switch_improvement: 0.05

@@ -1,0 +1,43 @@
+study: acquisition_comparison
+experiment_name: acquisition_comparison
+fields: [smooth, localized, anisotropic, rough_correlated, rough_multiscale, periodic, trend_plus_local]
+jackknife:
+  buffer:
+    mode: median_nearest_neighbor
+    multiplier: 1.0
+    minimum_radius: 0.025
+    maximum_radius: 0.20
+    minimum_training_points: 3
+initial_design:
+  name: interior_maximin
+  sample_count: 5
+  boundary_margin: 0.05
+benchmark:
+  trials: 10
+  initial_design_seeds: [201, 203, 211, 223, 227]
+  final_budget: 30
+  candidate_count: 1024
+  evaluation_grid_size: 80
+  base_seed: 202603
+  minimum_physical_spacing: 0.05
+visualization:
+  save_gif: false
+  save_frames: false
+  save_contact_sheet: false
+  frame_duration_ms: 500
+  final_frame_duration_ms: 1500
+  snapshot_every: 2
+  dpi: 180
+  save_pdf: false
+kernel:
+  enabled: true
+  optimization:
+    every_step: true
+    restarts: 2
+  reselection:
+    minimum_points: 6
+    maximum_interval: 5
+    score_degradation_fraction: 0.10
+    bound_proximity_fraction: 0.05
+    bound_contact_steps: 2
+    minimum_switch_improvement: 0.05

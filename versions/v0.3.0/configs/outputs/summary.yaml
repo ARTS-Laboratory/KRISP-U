@@ -1,0 +1,4 @@
+mode: summary
+save_spatial_arrays: false
+save_gif: true
+save_png_snapshots: false
