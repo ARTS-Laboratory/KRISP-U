@@ -16,6 +16,7 @@ from evaluation.runners.suite import run_benchmark
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SUITE_NAMES: tuple[str, ...] = (
+    "monte_carlo_2d",
     "development",
     "kernel_recovery",
     "canonical_2d",
@@ -23,13 +24,15 @@ SUITE_NAMES: tuple[str, ...] = (
     "noise_robustness",
     "full_evaluation",
 )
+DEFAULT_SUITE_NAMES: tuple[str, ...] = ("monte_carlo_2d",)
 
 
 def run_all_suites(
-    suite_names: Sequence[str] = SUITE_NAMES,
+    suite_names: Sequence[str] = DEFAULT_SUITE_NAMES,
     output_root: Path | None = None,
     *,
     continue_on_error: bool = True,
+    smoke: bool = False,
 ) -> dict[str, Any]:
     """Run selected suites and persist one status manifest.
 
@@ -61,7 +64,10 @@ def run_all_suites(
         try:
             with warnings.catch_warnings(record=True) as captured:
                 warnings.simplefilter("always", ConvergenceWarning)
-                output = run_benchmark(config_path, root)
+                if smoke and name == "monte_carlo_2d":
+                    output = run_benchmark(config_path, root, smoke=True)
+                else:
+                    output = run_benchmark(config_path, root)
             result["expected_convergence_warnings"] = sum(
                 warning.category is ConvergenceWarning for warning in captured
             )
@@ -125,11 +131,17 @@ def main() -> int:
         action="store_true",
         help="Stop after the first failed suite.",
     )
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Run the focused 2D study with five paired trials.",
+    )
     args = parser.parse_args()
     summary = run_all_suites(
-        args.suite_names or SUITE_NAMES,
+        args.suite_names or DEFAULT_SUITE_NAMES,
         args.output_root,
         continue_on_error=not args.fail_fast,
+        smoke=args.smoke,
     )
     return int(any(result["status"] == "failed" for result in summary["results"]))
 

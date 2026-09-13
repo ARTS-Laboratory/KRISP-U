@@ -65,10 +65,12 @@ _NESTED_KEYS = {
     "initial_design": {"name", "sample_count", "boundary_margin"},
     "benchmark": {
         "trials",
+        "smoke_trials",
         "initial_design_seeds",
         "final_budget",
         "candidate_count",
         "evaluation_grid_size",
+        "gif_grid_size",
         "base_seed",
         "minimum_physical_spacing",
     },
@@ -179,6 +181,7 @@ def _normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
         "final_budget",
         "candidate_count",
         "evaluation_grid_size",
+        "gif_grid_size",
         "base_seed",
         "initial_sample_count",
     ):
@@ -264,6 +267,10 @@ def _validate_config(config: dict[str, Any]) -> None:
         "krispu_adaptive",
         "gp_posterior_variance",
         "random_sequential",
+        "adaptive_krispu",
+        "adaptive_kriging",
+        "progressive_lhs",
+        "sequential_maximin",
     }
     unknown_methods = set(config["methods"]).difference(methods)
     if unknown_methods:

@@ -1,0 +1,35 @@
+version: v0.3.0
+seed_and_resolution:
+  seed: 202603
+  dpi: 180
+  final_budget: 20
+  grid_size: 48
+  candidate_count: 280
+  animation_points: 36
+  animation_frame_ms: 450
+  animation_final_hold_ms: 2500
+  jackknife_sample_count: 10
+  jackknife_frame_ms: 650
+  jackknife_final_hold_ms: 2500
+output_groups:
+- doe_comparison
+- workflow
+- theory
+- toy_smooth
+- toy_rough_multiscale
+- summary
+source_data:
+- evaluation.fields.canonical.smooth
+- evaluation.fields.synthetic_gp.kernel_fields.rough_multiscale_field
+- evaluation.runners.sequential.run_sequential_design
+scope:
+  required:
+  - existing_doe_approaches
+  - krispu_workflow
+  - krispu_theory
+  - smooth_toy_problem
+  - rough_multiscale_toy_problem
+  excluded:
+  - additive_manufacturing
+  - air_force_application
+  - real_world_application_slides

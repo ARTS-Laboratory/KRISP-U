@@ -47,7 +47,23 @@ def main() -> None:
     print(output)
 
 
-def run_benchmark(config_path: Path, output_root: Path = Path("outputs")) -> Path:
+def run_benchmark(
+    config_path: Path,
+    output_root: Path = Path("outputs"),
+    *,
+    smoke: bool = False,
+) -> Path:
+    """Run the focused 2D study or an explicitly selected legacy profile."""
+
+    raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+    if isinstance(raw, dict) and raw.get("study") == "monte_carlo_2d":
+        from evaluation.runners.monte_carlo_2d import run_monte_carlo_2d
+
+        return run_monte_carlo_2d(config_path, output_root, smoke=smoke)
+    return _run_legacy_benchmark(config_path, output_root)
+
+
+def _run_legacy_benchmark(config_path: Path, output_root: Path = Path("outputs")) -> Path:
     config = load_config(config_path)
     if config.get("study") == "kernel_selection":
         from evaluation.runners.kernel_study import run_kernel_selection_study

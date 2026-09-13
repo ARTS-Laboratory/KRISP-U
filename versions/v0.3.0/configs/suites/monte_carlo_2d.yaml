@@ -1,0 +1,51 @@
+study: monte_carlo_2d
+experiment_name: monte_carlo_2d
+fields:
+  - smooth_single_scale
+  - clustered_observations
+  - branin
+  - baseline_drift
+  - white_noise
+  - heteroscedastic_noise
+  - matched_spherical
+methods:
+  - adaptive_krispu
+  - adaptive_kriging
+  - raw_jackknife_sensitivity
+  - progressive_lhs
+  - sequential_maximin
+  - random
+initial_design:
+  name: interior_maximin
+  sample_count: 5
+  boundary_margin: 0.05
+benchmark:
+  trials: 10
+  smoke_trials: 3
+  final_budget: 20
+  candidate_count: 96
+  evaluation_grid_size: 32
+  gif_grid_size: 64
+  base_seed: 202603
+  minimum_physical_spacing: 0.01
+jackknife:
+  buffer:
+    mode: median_nearest_neighbor
+    multiplier: 1.0
+    minimum_radius: 0.025
+    maximum_radius: 0.20
+    minimum_training_points: 3
+kernel_selection:
+  mode: automatic
+  candidate_set: standard
+  optimization:
+    restarts: 0
+  reselection:
+    minimum_points: 4
+    maximum_interval: 5
+    score_degradation_fraction: 0.10
+    bound_contact_steps: 2
+    minimum_switch_improvement: 0.05
+output:
+  mode: summary
+dpi: 160
