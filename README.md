@@ -11,34 +11,8 @@ layouts, and neither implementation silently falls back to the other.
 | Version | Implementation | Primary interface |
 | --- | --- | --- |
 | [v0.1.0](versions/v0.1.0/README.md) | PyKrige with leave-one-out resampling, whole-field divergence, and an interpolated uncertainty map | `KRISPU` class |
-| [v0.2.0](versions/v0.2.0/README.md) | Gaussian Process Regression active field reconstruction and candidate recommendation | `krispu` package and `krispu-recommend` |
 
-The original online v0.1.0 state is also preserved by the Git tag `v0.1.0`.
-The complete merged repository is tagged `v0.2.0`. Source provenance and
-checksums are recorded in [`versions/manifest.yaml`](versions/manifest.yaml).
 
-## Installation
-
-Install only the version required for a particular analysis, preferably in a
-dedicated virtual environment.
-
-```bash
-cd versions/v0.1.0
-python -m pip install -e .
-```
-
-```bash
-cd versions/v0.2.0
-python -m pip install -e ".[plot]"
-```
-
-See each version's README for its workflow and examples. Presentation and
-tutorial materials are under [`docs/tutorial`](docs/tutorial), and the
-repository QR code is under [`docs/media`](docs/media).
-
-Generated `benchmark_outputs` and `recommendation_outputs` directories are
-intentionally not version-controlled. Raw example inputs and curated figures
-are retained with the version that uses them.
 
 ## Licensing and citation
 
