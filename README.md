@@ -1,10 +1,7 @@
 # KRISP-U
 
 Kriging with Iterative Spatial Prediction of Uncertainty (KRISP-U) is research
-software for reconstructing a field and selecting informative measurements.
-This repository preserves two independently runnable scientific
-implementations. They are versioned methods, not interchangeable directory
-layouts, and neither implementation silently falls back to the other.
+software for design of experiments by optimizing sample placement for experimental domains.
 
 ## Versions
 
