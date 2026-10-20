@@ -10,3 +10,7 @@
 **/*.egg-info/
 **/benchmark_outputs/
 **/recommendation_outputs/
+.DS_Store
+~$*
+
+
